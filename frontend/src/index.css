@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 222 24% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 24% 16%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 24% 16%;
+    --primary: 222 47% 31%;
+    --primary-foreground: 210 40% 98%;
+    --muted: 210 16% 93%;
+    --muted-foreground: 215 16% 42%;
+    --accent: 210 16% 93%;
+    --accent-foreground: 222 24% 16%;
+    --border: 214 20% 88%;
+    --input: 214 20% 88%;
+    --ring: 222 47% 41%;
+    --radius: 0.5rem;
+
+    /* semantic: high = red, medium = amber, low/ok = calm green-grey */
+    --danger: 0 72% 46%;
+    --danger-foreground: 0 0% 100%;
+    --danger-soft: 0 72% 96%;
+    --warn: 35 92% 45%;
+    --warn-foreground: 30 50% 12%;
+    --warn-soft: 40 90% 95%;
+    --ok: 160 25% 40%;
+    --ok-foreground: 0 0% 100%;
+    --ok-soft: 160 25% 95%;
+  }
+
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+  }
+  /* tabular numbers for counts, times, confidence */
+  .nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
