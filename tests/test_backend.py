@@ -177,3 +177,27 @@ def test_routes_validate_input_and_map_errors(tmp_path):
     with pytest.raises(HTTPException) as e:
         main.delete_email("E001", req)
     assert e.value.status_code == 404
+
+
+def test_api_key_is_optional_and_checked_when_set(monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+
+    from backend import main
+
+    def req(path="/api/emails", headers=None, query=""):
+        scope = {"type": "http", "path": path, "query_string": query.encode(),
+                 "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+        return Request(scope)
+
+    monkeypatch.delenv("API_KEY", raising=False)
+    main.require_key(req())  # unset: open
+    monkeypatch.setenv("API_KEY", "s3cret")
+    with pytest.raises(HTTPException) as e:
+        main.require_key(req())
+    assert e.value.status_code == 401
+    with pytest.raises(HTTPException):
+        main.require_key(req(headers={"X-API-Key": "wrong"}))
+    main.require_key(req(headers={"X-API-Key": "s3cret"}))
+    main.require_key(req("/api/events", query="api_key=s3cret"))
+    main.require_key(req("/api/health"))  # health stays open

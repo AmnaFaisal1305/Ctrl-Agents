@@ -7,14 +7,18 @@ import type {
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === "1";
 export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+export const API_KEY = import.meta.env.VITE_API_KEY || "";
 export { ApiError };
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      headers: init?.body ? { "Content-Type": "application/json" } : undefined,
       ...init,
+      headers: {
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+      },
     });
   } catch {
     throw new ApiError(0, "Cannot reach the backend. Is it running on " + API_BASE + "?");

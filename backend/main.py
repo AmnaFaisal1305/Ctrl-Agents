@@ -4,11 +4,12 @@ Run from the repo root:  uvicorn backend.main:app --port 8000
 There is deliberately no endpoint that sends email; replies are drafts in outbox.json only.
 """
 import asyncio
+import hmac
 import json
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -40,7 +41,19 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Student Helpdesk Triage API", version="1.0", lifespan=lifespan)
+def require_key(request: Request) -> None:
+    """Optional shared-secret check: off when API_KEY is unset. EventSource cannot set headers,
+    so /api/events also accepts ?api_key=. Guards casual access only (the key ships in the UI bundle)."""
+    key = os.getenv("API_KEY", "")
+    if not key or request.url.path == "/api/health":
+        return
+    given = request.headers.get("x-api-key") or request.query_params.get("api_key", "")
+    if not hmac.compare_digest(given.encode(), key.encode()):
+        raise HTTPException(401, "missing or wrong API key")
+
+
+app = FastAPI(title="Student Helpdesk Triage API", version="1.0", lifespan=lifespan,
+              dependencies=[Depends(require_key)])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),

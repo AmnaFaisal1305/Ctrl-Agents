@@ -52,7 +52,7 @@ If the same error resists about 15 minutes, stop, summarize what you tried, and 
 - **Verify before claiming done:** run the command and show the result. Separate what you ran from what you assume. Never say tests pass without running them.
 - **Own mistakes:** if you find an error in your earlier work, say so, fix it, and explain the cause.
 - **Quota discipline (Gemini free tier):** develop on single emails, run all 20 only at gates, mock the LLM in unit tests, print the LLM call count at the end of a run. Treat 429 as retry with backoff.
-- **Docs first for APIs:** look up current `langgraph`, `langchain-google-genai`, `pydantic`, Gmail API and `streamlit` docs (Context7, langchain skills) before writing SDK calls. Docs are reference, not final truth: verify by running.
+- **Docs first for APIs:** look up current `langgraph`, `langchain-google-genai`, `pydantic`, Gmail API, FastAPI and Vite/React docs (Context7, langchain skills) before writing SDK calls. Docs are reference, not final truth: verify by running.
 - **No superpowers skills:** do not use any `superpowers:*` skill in this repo.
 - **Dependencies:** add none without asking. Pin versions.
 - **Git (if used):** small commits, `type: summary` messages, never force-push, never commit secrets.
@@ -74,7 +74,7 @@ Not needed here: document and spreadsheet skills, sales and outreach skills, ban
 
 | MCP | Use it for |
 |---|---|
-| Context7 | Current docs for `langgraph`, `langchain-google-genai`, `pydantic`, Gmail API, `streamlit`, Vite and React. Use it instead of writing SDK calls from memory. |
+| Context7 | Current docs for `langgraph`, `langchain-google-genai`, `pydantic`, Gmail API, FastAPI, Vite and React. Use it instead of writing SDK calls from memory. |
 | langchain-mcp | LangChain and LangGraph documentation, when connected. |
 
 Do not use any other connector (design, deployment, CRM, automation or database tools). The agent talks to real people or accounts never; the only mailbox it touches is the designated Gmail one (read + drafts).
@@ -89,7 +89,6 @@ python agent.py --watch              # P2: process new files as they appear
 python agent.py --only-new           # P1: reuse rows for unchanged files
 pytest                               # unit tests (LLM mocked)
 python evals/run_evals.py            # property checks and adversarial cases
-streamlit run dashboard/streamlit_app.py   # P2 dashboard
 uvicorn backend.main:app --port 8000 # FastAPI backend for the React frontend (frontend/Design.md has the API)
 ```
 
