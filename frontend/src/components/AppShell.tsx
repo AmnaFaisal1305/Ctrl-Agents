@@ -15,7 +15,7 @@ function HealthDot() {
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground" title={data?.model}>
       <span className={cn("h-2 w-2 rounded-full", data == null ? "bg-muted-foreground" : ok ? "bg-ok" : "bg-warn")} />
-      {data == null ? "connecting…" : ok ? data.model : "LLM not ready"}
+      <span className="hidden sm:inline">{data == null ? "connecting…" : ok ? data.model : "LLM not ready"}</span>
     </span>
   );
 }
@@ -33,10 +33,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <header className="sticky top-0 z-40 border-b bg-card/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
-          <NavLink to="/" className="flex items-center gap-2 font-semibold">
+        <div className="mx-auto flex max-w-7xl items-center gap-2 px-4 py-3 sm:gap-4">
+          <NavLink to="/" aria-label="Helpdesk Triage" className="flex items-center gap-2 font-semibold">
             <Inbox className="h-5 w-5 text-primary" aria-hidden />
-            Helpdesk Triage
+            <span className="hidden sm:inline">Helpdesk Triage</span>
           </NavLink>
           <nav className="flex items-center gap-1" aria-label="Primary">
             <NavLink to="/" end className={navClass}>
