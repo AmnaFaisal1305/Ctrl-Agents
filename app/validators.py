@@ -28,6 +28,8 @@ def validate(record: OutboxRecord, email: EmailIn, policy: Policy, looked_up_cod
             issues.append(_hard("NOT_LOOKED_UP", f"{code} was not returned by lookup_policy; look it up first or drop it."))
     if record.policy_refs and not any(c in reply for c in record.policy_refs):
         issues.append(_hard("CODE_NOT_IN_REPLY", "Mention at least one policy code from policy_refs in reply_draft."))
+    if record.escalate and not record.policy_refs:
+        issues.append(_hard("NO_POLICY_CODE", "escalate is true: put the ESC code in policy_refs and cite it in reply_draft."))
     if record.escalate and not _ESC_CODE.search(record.escalation_reason):
         issues.append(_hard("ESCALATION_REASON", "escalate is true: escalation_reason must start with the ESC code and name the office, e.g. 'ESC-5: overdue complaint; Hostel Warden'. If no ESC rule applies, set escalate to false."))
     if not record.escalate and record.escalation_reason.strip():

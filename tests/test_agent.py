@@ -102,3 +102,14 @@ def test_escalate_requires_esc_code():
     rec = OutboxRecord(email_id="T1", category="technical", priority="high", escalate=True, escalation_reason="urgent deadline",
                        policy_refs=[], confidence=0.8, agent_notes="n", reply_draft="Dear Sara, ok. Student Helpdesk")
     assert "ESCALATION_REASON" in {i.code for i in validate(rec, EMAIL, POLICY, [])}
+
+
+def test_escalation_needs_a_policy_code_in_refs():
+    from app.models import OutboxRecord
+
+    base = dict(email_id="T1", category="security", priority="high", escalate=True, escalation_reason="ESC-6: suspicious; IT Security",
+                confidence=0.8, agent_notes="n")
+    bare = OutboxRecord(**base, policy_refs=[], reply_draft="Dear Sara, flagged. Student Helpdesk")
+    cited = OutboxRecord(**base, policy_refs=["ESC-6"], reply_draft="Dear Sara, flagged (ESC-6). Student Helpdesk")
+    assert "NO_POLICY_CODE" in {i.code for i in validate(bare, EMAIL, POLICY, [])}
+    assert "NO_POLICY_CODE" not in {i.code for i in validate(cited, EMAIL, POLICY, [])}
