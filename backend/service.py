@@ -25,14 +25,23 @@ class NotFound(Exception):
     pass
 
 
+class Protected(Exception):
+    """The action is not allowed on this email."""
+
+
+class GmailNotReady(Exception):
+    pass
+
+
 class Service:
     def __init__(self, settings: Settings, model=None) -> None:
         self.s = settings
         self.policy = Policy.parse(settings.policy)
         self.model = model if model is not None else self._make_model()
         self._pool = ThreadPoolExecutor(max_workers=1)  # one run at a time; the next waits its turn
-        self._lock = threading.Lock()
-        self._state = {"running": False, "total": 0, "done": 0, "llm_calls": 0, "queued": 0, "pending_ids": []}
+        self._lock = threading.Lock()  # guards _state
+        self._io = threading.Lock()  # guards the outbox.json read-modify-write
+        self._state = {"running": False, "total": 0, "done": 0, "llm_calls": 0, "queued": 0, "pending_ids": [], "error": ""}
 
     def _make_model(self):
         try:
@@ -114,45 +123,98 @@ class Service:
 
     def start_run(self, ids: list[str] | None = None, only_new: bool = False) -> dict:
         """Queue a run over `ids` (None = every file in the inbox). Returns the run state immediately."""
+        for email_id in ids or []:
+            self._path(email_id)  # raises NotFound for unknown or unsafe ids
+        return self._queue(self._run, ids, only_new)
+
+    def reprocess(self, email_id: str) -> dict:
+        return self.start_run([email_id])
+
+    def gmail_ready(self) -> bool:
+        """The OAuth token exists; the browser authorization is done once with `python agent.py --gmail`."""
+        return (self.s.secrets / "token.json").exists()
+
+    def start_gmail(self, create_drafts: bool = False) -> dict:
+        if not self.gmail_ready():
+            raise GmailNotReady("Gmail is not authorized yet: run `python agent.py --gmail` once in a terminal.")
+        return self._queue(self._gmail_job, create_drafts)
+
+    def delete_email(self, email_id: str) -> None:
+        """Remove an email added through the API (web-*) with its row and log. Sample and Gmail emails are protected."""
+        path = self._path(email_id)
+        if not email_id.startswith("web-"):
+            raise Protected(email_id)
+        if email_id in self.state()["pending_ids"]:
+            raise Protected(f"{email_id} is being processed")
+        with self._io:
+            rows = {k: v for k, v in self._records().items() if k != email_id}
+            write_outbox([OutboxRecord(**v) for v in rows.values()], self.s.outbox)
+            path.unlink(missing_ok=True)
+        (self.s.logs / f"{email_id}.jsonl").unlink(missing_ok=True)
+
+    def outbox_rows(self) -> list[dict]:
+        return sorted(self._records().values(), key=lambda r: r["email_id"])
+
+    def _queue(self, fn, *args) -> dict:
         with self._lock:
             self._state["queued"] += 1
-        self._pool.submit(self._run, ids, only_new)
+        self._pool.submit(self._job, fn, *args)
         return self.state()
 
-    def _run(self, ids: list[str] | None, only_new: bool) -> None:
+    def _job(self, fn, *args) -> None:
+        with self._lock:
+            self._state["queued"] -= 1
+            self._state["error"] = ""
         try:
-            emails = [e for e in load_inbox(self.s.inbox) if ids is None or e.id in ids]
-            reused = agent.reusable_rows(emails, self.s.outbox, self.s.logs) if only_new else {}
-            todo = [e for e in emails if e.id not in reused]
+            fn(*args)
+        except Exception as exc:  # the run thread must never die silently; the UI shows `error`
             with self._lock:
-                self._state.update(running=True, total=len(todo), done=0, llm_calls=0, pending_ids=[e.id for e in todo])
-                self._state["queued"] -= 1
-            with ThreadPoolExecutor(max_workers=self.s.workers) as pool:
-                futures = [pool.submit(agent.process, e, self.model, self.policy, self.s.logs) for e in todo]
-                for future in as_completed(futures):
-                    record, calls = future.result()
-                    self._save(record, next(e for e in todo if e.id == record.email_id))
-                    with self._lock:
-                        self._state["done"] += 1
-                        self._state["llm_calls"] += calls
-                        self._state["pending_ids"].remove(record.email_id)
+                self._state["error"] = f"{type(exc).__name__}: {str(exc)[:200]}"
         finally:
             with self._lock:
                 self._state.update(running=False, pending_ids=[])
 
+    def _run(self, ids: list[str] | None, only_new: bool) -> None:
+        emails = [e for e in load_inbox(self.s.inbox) if ids is None or e.id in ids]
+        reused = agent.reusable_rows(emails, self.s.outbox, self.s.logs) if only_new else {}
+        self._process([e for e in emails if e.id not in reused])
+
+    def _process(self, todo: list[EmailIn]) -> None:
+        with self._lock:
+            self._state.update(running=True, total=len(todo), done=0, llm_calls=0, pending_ids=[e.id for e in todo])
+        by_id = {e.id: e for e in todo}
+        with ThreadPoolExecutor(max_workers=self.s.workers) as pool:
+            futures = [pool.submit(agent.process, e, self.model, self.policy, self.s.logs) for e in todo]
+            for future in as_completed(futures):
+                record, calls = future.result()
+                self._save(record, by_id[record.email_id])
+                with self._lock:
+                    self._state["done"] += 1
+                    self._state["llm_calls"] += calls
+                    self._state["pending_ids"].remove(record.email_id)
+
+    def _gmail_job(self, create_drafts: bool) -> None:
+        """Fetch the Gmail label into the inbox, process what was fetched, optionally save DRAFTS (never sent)."""
+        service, ids = agent.gmail_fetch(self.s)
+        self._process([e for e in load_inbox(self.s.inbox) if e.id in ids])
+        if create_drafts:
+            records = [OutboxRecord(**r) for r in self._records().values() if r["email_id"] in ids]
+            agent.save_drafts(service, records, ids, self.s.logs)
+
     def _save(self, record: OutboxRecord, email: EmailIn) -> None:
         """Merge one finished row into outbox.json (so the UI sees it at once) and remember the email hash."""
-        rows = {k: OutboxRecord(**v) for k, v in self._records().items()}
-        rows[record.email_id] = record
-        write_outbox(list(rows.values()), self.s.outbox)
-        seen_file = self.s.logs / "seen.json"
-        try:
-            seen = json.loads(seen_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            seen = {}
-        seen[email.id] = agent.email_hash(email)
-        self.s.logs.mkdir(parents=True, exist_ok=True)
-        seen_file.write_text(json.dumps(seen), encoding="utf-8")
+        with self._io:
+            rows = {k: OutboxRecord(**v) for k, v in self._records().items()}
+            rows[record.email_id] = record
+            write_outbox(list(rows.values()), self.s.outbox)
+            seen_file = self.s.logs / "seen.json"
+            try:
+                seen = json.loads(seen_file.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                seen = {}
+            seen[email.id] = agent.email_hash(email)
+            self.s.logs.mkdir(parents=True, exist_ok=True)
+            seen_file.write_text(json.dumps(seen), encoding="utf-8")
 
     def wait_idle(self, timeout: float = 60.0) -> None:
         """For tests and scripts: block until queued runs finish."""

@@ -121,8 +121,12 @@ Run it from the repo root: `uvicorn backend.main:app --port 8000` (the dev serve
 | `GET /api/emails` | the queue | array of `{id, from_name, from_email, subject, received_at, status, record}`; `status` is `pending \| processing \| done`; `record` is the row or `null` |
 | `GET /api/emails/{id}` | one email | same fields plus `body`, `load_warnings[]`, `steps[]`; `404` if unknown |
 | `POST /api/emails` | add an email | body `{from_name, from_email, subject, body, process=true}`; `201 {id, processing, run}`; `422` if subject and body are both empty |
-| `POST /api/process` | run the agent | body `{only_new=false, ids=null}`; `202` with run state; `ids: null` means every email |
-| `GET /api/run` | run progress | `{running, total, done, llm_calls, queued, pending_ids[]}` |
+| `DELETE /api/emails/{id}` | remove an email you added | `204`; `409` for sample or Gmail emails (only `web-*` ids can be deleted) or while processing; `404` if unknown |
+| `POST /api/emails/{id}/reprocess` | run the agent again on one email | `202` with run state; `404` if unknown |
+| `POST /api/process` | run the agent | body `{only_new=false, ids=null}`; `202` with run state; `ids: null` means every email; `422` if an id is unknown |
+| `POST /api/gmail/fetch` | fetch the Gmail label, process it | body `{create_drafts=false}`; `202` with run state; `409` with a message if Gmail is not authorized yet. Replies are saved as Gmail **drafts** only when `create_drafts` is true; nothing is ever sent |
+| `GET /api/run` | run progress | `{running, total, done, llm_calls, queued, pending_ids[], error}`; `error` is `""` or a short message when the last run failed |
+| `GET /api/outbox` | the raw result file | array of rows with exactly the 9 contest fields, sorted by `email_id` |
 | `GET /api/stats` | dashboard numbers | `{total, emails_in_inbox, escalated, needs_human_fallback, avg_confidence, by_category{}, by_priority{}}` |
 | `GET /api/policy` | policy clauses | `[{section, clauses: [{code, text}]}]` |
 | `GET /api/events` | live stream (SSE) | events `step` (a step object) and `run` (a run state object); see below |
@@ -136,7 +140,8 @@ es.addEventListener("run", (e) => setRun(JSON.parse(e.data)));
 - `step` events arrive as the agent works; when a step has `action: "validate"` and `reason: "accepted"` (or `action: "fallback"`), the final row is saved, so refetch `GET /api/emails/{id}`.
 - `EventSource` reconnects by itself. Fall back to polling `GET /api/run` every 2 s if the stream fails.
 - A new email takes roughly 3 to 10 seconds; a full run of 20 emails takes about a minute.
-- Not yet available (planned): Gmail fetch trigger. Do not build UI for it yet.
+- Runs are queued one at a time; `run.queued` counts runs waiting. Show `run.error` if it is non-empty.
+- Gmail button (optional, low priority): `POST /api/gmail/fetch`; if it answers `409`, show its message (the one-time authorization is done by the developer in a terminal). Use the same progress UI as a normal run.
 
 ## 8. Working before the backend is ready, or without the model
 

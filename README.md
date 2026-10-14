@@ -47,7 +47,7 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 uvicorn backend.main:app --port 8000      # run from the repo root; docs at http://localhost:8000/docs
 ```
 
-`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `POST /api/process`, `GET /api/stats`, `GET /api/policy`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
+`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
 
 ## Tests and evals
 

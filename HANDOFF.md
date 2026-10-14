@@ -2,6 +2,13 @@
 
 Updated at the end of every session. Newest session at the top. Keep it short and factual.
 
+## Session 2c (backend completed)
+
+**Done:** `POST /api/emails/{id}/reprocess`, `DELETE /api/emails/{id}` (only `web-*`, never sample or Gmail mail), `GET /api/outbox`, `POST /api/gmail/fetch` (409 until `secrets/token.json` exists; drafts only with `create_drafts: true`), run state `error` field (a failed run no longer dies silently), lock around outbox writes, unknown ids rejected. `frontend/Design.md` API table updated.
+**Verified live (real server, real Gemini):** add email, 2 LLM calls, `FEE-3`; reprocess gives a single-run log (4 steps, not 8); outbox endpoint 21 rows x 9 keys; DELETE sample returns 409, unknown returns 404, bad process ids 422; delete of a web email 204; `/api/gmail/fetch` ran read-only against the real token and found 0 messages, no error. `pytest`: 42 passed (Gmail mocked in tests; one test run earlier hit the real token read-only by mistake and was isolated).
+**Not verified:** Gmail fetch with real messages, and `create_drafts: true` against real Gmail (label still empty). No HTTP-client tests (route functions are called directly to avoid adding `httpx`).
+**Next:** frontend (teammate); user adds Gmail test emails, then I verify fetch + drafts + empty Sent; optional `--watch`.
+
 ## Session 2b (FastAPI backend + frontend brief)
 
 **Date:** 2026-10-14. Decisions (asked, user chose the recommended options): API scope = dashboard + submit + run; in-process import of `app/` (stays at repo root, CLI unchanged); `fastapi` and `uvicorn` added and pinned; live updates via SSE.

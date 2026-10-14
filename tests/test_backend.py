@@ -78,3 +78,102 @@ def test_log_tail_returns_only_new_complete_lines(tmp_path):
 def test_policy_view_lists_sections(tmp_path):
     names = [s["section"] for s in make_service(tmp_path).policy_view()]
     assert "Fees" in names and "Escalation rules" in names
+
+
+def fake_request(svc):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(svc=svc)))
+
+
+def test_start_run_rejects_unknown_ids(tmp_path):
+    svc = make_service(tmp_path)
+    with pytest.raises(NotFound):
+        svc.start_run(["ghost"])
+
+
+def test_reprocess_replaces_row_and_log(tmp_path):
+    svc = make_service(tmp_path)
+    email_id = svc.create_email("Sara", "", "Late fee", "Please waive my late fee.")
+    svc.start_run([email_id])
+    svc.wait_idle()
+    svc.model = FakeModel([("LookupPolicy", {"reason": "fees", "section": "Fees"}), ("Submit", submit_args())])
+    svc.reprocess(email_id)
+    svc.wait_idle()
+    assert len(svc.outbox_rows()) == 1
+    assert [s["step"] for s in svc.steps(email_id)] == [1, 1, 2, 2]  # one run's log, not two appended
+
+
+def test_delete_only_web_emails(tmp_path):
+    svc = make_service(tmp_path)
+    web = svc.create_email("Sara", "", "hi", "hello there")
+    svc.start_run([web])
+    svc.wait_idle()
+    (svc.s.inbox / "E001.json").write_text(json.dumps({"id": "E001", "subject": "s", "body": "b"}), encoding="utf-8")
+    with pytest.raises(Exception) as err:
+        svc.delete_email("E001")
+    assert type(err.value).__name__ == "Protected" and (svc.s.inbox / "E001.json").exists()
+    svc.delete_email(web)
+    assert svc.outbox_rows() == [] and not (svc.s.inbox / f"{web}.json").exists() and svc.steps(web) == []
+
+
+def test_job_error_is_reported_not_swallowed(tmp_path):
+    svc = make_service(tmp_path)
+    email_id = svc.create_email("Sara", "", "hi", "hello there")
+    svc._process = lambda todo: (_ for _ in ()).throw(RuntimeError("boom"))
+    svc.start_run([email_id])
+    svc.wait_idle()
+    assert svc.state()["error"].startswith("RuntimeError") and svc.state()["running"] is False
+
+
+def test_gmail_requires_token_then_fetches_and_drafts_only_on_request(tmp_path, monkeypatch):
+    import agent
+    from backend.service import GmailNotReady
+
+    svc = make_service(tmp_path)
+    svc.s = replace(svc.s, secrets=tmp_path / "secrets")
+    with pytest.raises(GmailNotReady):
+        svc.start_gmail()
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "token.json").write_text("{}", encoding="utf-8")
+
+    def fake_fetch(settings):
+        (settings.inbox / "g1.json").write_text(json.dumps({"id": "g1", "from_name": "Gia", "subject": "Fee", "body": "Late fee?"}), encoding="utf-8")
+        return object(), {"g1"}
+
+    drafts = []
+    monkeypatch.setattr(agent, "gmail_fetch", fake_fetch)
+    monkeypatch.setattr(agent, "save_drafts", lambda service, records, ids, logs: drafts.append([r.email_id for r in records]))
+    svc.start_gmail(create_drafts=False)
+    svc.wait_idle()
+    assert [r["email_id"] for r in svc.outbox_rows()] == ["g1"] and drafts == []
+    svc.start_gmail(create_drafts=True)
+    svc.wait_idle()
+    assert drafts == [["g1"]]
+
+
+def test_routes_validate_input_and_map_errors(tmp_path):
+    from fastapi import HTTPException
+
+    from backend import main
+
+    svc = make_service(tmp_path)
+    svc.s = replace(svc.s, secrets=tmp_path / "no-secrets")  # never touch the real Gmail token in tests
+    req = fake_request(svc)
+    with pytest.raises(HTTPException) as e:
+        main.create_email(main.NewEmail(subject=" ", body=""), req)
+    assert e.value.status_code == 422
+    with pytest.raises(HTTPException) as e:
+        main.email_detail("nope", req)
+    assert e.value.status_code == 404
+    with pytest.raises(HTTPException) as e:
+        main.process(main.RunRequest(ids=["ghost"]), req)
+    assert e.value.status_code == 422
+    with pytest.raises(HTTPException) as e:
+        main.gmail_fetch(main.GmailRequest(), req)
+    assert e.value.status_code == 409
+    made = main.create_email(main.NewEmail(subject="Hi", body="hello", process=False), req)
+    assert made["id"].startswith("web-") and made["run"] is None
+    with pytest.raises(HTTPException) as e:
+        main.delete_email("E001", req)
+    assert e.value.status_code == 404

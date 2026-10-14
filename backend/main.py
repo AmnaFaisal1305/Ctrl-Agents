@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.config import load_settings
-from backend.service import LogTail, NotFound, Service
+from backend.service import GmailNotReady, LogTail, NotFound, Protected, Service
 
 
 class NewEmail(BaseModel):
@@ -30,6 +30,10 @@ class RunRequest(BaseModel):
     ids: list[str] | None = None  # None = every file in data/inbox
 
 
+class GmailRequest(BaseModel):
+    create_drafts: bool = False  # saves reply drafts in Gmail; nothing is ever sent
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.svc = Service(load_settings())
@@ -40,7 +44,7 @@ app = FastAPI(title="Student Helpdesk Triage API", version="1.0", lifespan=lifes
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -77,9 +81,45 @@ def create_email(payload: NewEmail, request: Request) -> dict:
     return {"id": email_id, "processing": payload.process, "run": run}
 
 
+@app.delete("/api/emails/{email_id}", status_code=204)
+def delete_email(email_id: str, request: Request) -> None:
+    try:
+        svc(request).delete_email(email_id)
+    except NotFound:
+        raise HTTPException(404, "email not found")
+    except Protected as exc:
+        raise HTTPException(409, f"cannot delete: only emails added through the API (web-*) and not being processed. {exc}")
+
+
+@app.post("/api/emails/{email_id}/reprocess", status_code=202)
+def reprocess(email_id: str, request: Request) -> dict:
+    try:
+        return svc(request).reprocess(email_id)
+    except NotFound:
+        raise HTTPException(404, "email not found")
+
+
 @app.post("/api/process", status_code=202)
 def process(payload: RunRequest, request: Request) -> dict:
-    return svc(request).start_run(payload.ids, payload.only_new)
+    try:
+        return svc(request).start_run(payload.ids, payload.only_new)
+    except NotFound as exc:
+        raise HTTPException(422, f"unknown email id: {exc}")
+
+
+@app.post("/api/gmail/fetch", status_code=202)
+def gmail_fetch(payload: GmailRequest, request: Request) -> dict:
+    """Fetch the configured Gmail label (read-only), process it, optionally save drafts. Never sends."""
+    try:
+        return svc(request).start_gmail(payload.create_drafts)
+    except GmailNotReady as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.get("/api/outbox")
+def outbox(request: Request) -> list[dict]:
+    """The raw outbox.json rows (exactly the 9 contest fields)."""
+    return svc(request).outbox_rows()
 
 
 @app.get("/api/run")
