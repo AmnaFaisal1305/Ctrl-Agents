@@ -14,17 +14,18 @@ from app.llm import make_llm
 from app.loader import load_inbox
 from app.logger import log_step
 from app.models import EmailIn, OutboxRecord
+from app.reflect import make_critic, reflect_enabled
 from app.policy import Policy
 from app.writer import write_outbox
 
 
-def process(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[OutboxRecord, int]:
+def process(email: EmailIn, model, policy: Policy, logs: Path, critic=None) -> tuple[OutboxRecord, int]:
     """Run the LangGraph agent for one email. Returns (record, llm_calls); never raises."""
     try:
         if model is None:
             log_step(logs, email.id, 0, "rule", "fallback", "LLM unavailable")
             return fallback_record(email, "LLM unavailable"), 0
-        return run_email(email, model, policy, logs)
+        return run_email(email, model, policy, logs, critic)
     except Exception as exc:  # fail soft: every email gets a row
         return fallback_record(email, f"unexpected error: {type(exc).__name__}"), 0
 
@@ -94,8 +95,14 @@ def main() -> int:
     except Exception as exc:  # e.g. missing GOOGLE_API_KEY: every email still gets a fallback row
         print(f"LLM unavailable ({type(exc).__name__}); writing fallback rows", flush=True)
         model = None
+    critic = None
+    if model is not None and reflect_enabled():
+        try:
+            critic = make_critic(settings)
+        except Exception as exc:  # the review is optional
+            print(f"Reflection disabled ({type(exc).__name__})", flush=True)
     with ThreadPoolExecutor(max_workers=settings.workers) as pool:
-        results = list(pool.map(lambda e: process(e, model, policy, settings.logs), todo))
+        results = list(pool.map(lambda e: process(e, model, policy, settings.logs, critic), todo))
     records = [r for r, _ in results] + list(reused.values())
     settings.logs.mkdir(parents=True, exist_ok=True)
     (settings.logs / "seen.json").write_text(json.dumps({e.id: email_hash(e) for e in emails}), encoding="utf-8")

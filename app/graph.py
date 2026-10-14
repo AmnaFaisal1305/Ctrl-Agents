@@ -12,7 +12,8 @@ from app.fallback import fallback_record
 from app.logger import log_step
 from app.models import EmailIn, GraphState, OutboxRecord
 from app.policy import Policy
-from app.prompts import build_email_block, build_system_prompt
+from app.reflect import critique
+from app.prompts import build_email_block, build_system_prompt, context_meta
 from app.safety import post_check, preflags
 from app.tools import lookup_policy
 from app.validators import validate
@@ -24,6 +25,11 @@ _CODE = re.compile(r"^([A-Z]+-\d+):", re.M)
 def _calls(state: GraphState) -> list[dict]:
     last = state["messages"][-1]
     return last.tool_calls if isinstance(last, AIMessage) else []
+
+
+def _tokens(ai: AIMessage) -> dict:
+    u = getattr(ai, "usage_metadata", None) or {}
+    return {k: u[k] for k in ("input_tokens", "output_tokens") if k in u}
 
 
 def _tool_replies(calls: list[dict], first_result: str) -> list[ToolMessage]:
@@ -43,11 +49,11 @@ def build_graph(model, policy: Policy, logs: Path):
         n = state["llm_calls"] + 1
         ms = int((time.monotonic() - t0) * 1000)
         if not ai.tool_calls:
-            log_step(logs, eid, n, "model", "no_tool_call", "model returned no tool call", latency_ms=ms)
+            log_step(logs, eid, n, "model", "no_tool_call", "model returned no tool call", latency_ms=ms, meta=_tokens(ai))
             return {"messages": [ai, HumanMessage("Call exactly one tool.")], "llm_calls": n}
         c = ai.tool_calls[0]
         args = {k: v for k, v in c["args"].items() if k != "reason"}
-        log_step(logs, eid, n, "model", c["name"], c["args"].get("reason", ""), args=args if c["name"] != "Submit" else {}, latency_ms=ms)
+        log_step(logs, eid, n, "model", c["name"], c["args"].get("reason", ""), args=args if c["name"] != "Submit" else {}, latency_ms=ms, meta=_tokens(ai))
         return {"messages": [ai], "llm_calls": n}
 
     def tools(state: GraphState) -> dict:
@@ -55,7 +61,8 @@ def build_graph(model, policy: Policy, logs: Path):
         a = call["args"]
         text = lookup_policy(policy, a.get("section", ""), a.get("codes") or None, a.get("query", ""))
         found = _CODE.findall(text)
-        log_step(logs, state["email"].id, step_no(state), "rule", "lookup_result", f"returned {', '.join(found) or 'nothing'}")
+        log_step(logs, state["email"].id, step_no(state), "rule", "lookup_result", f"returned {', '.join(found) or 'nothing'}",
+                 meta={"codes": found, "chars": len(text)})
         return {"messages": _tool_replies(_calls(state), text), "looked_up_codes": state["looked_up_codes"] + found}
 
     def submit(state: GraphState) -> dict:
@@ -103,16 +110,34 @@ def build_graph(model, policy: Policy, logs: Path):
     return g.compile()
 
 
-def run_email(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[OutboxRecord, int]:
-    """Run the graph for one email. Returns (record, llm_calls). Never raises."""
+def _reflect(email: EmailIn, record: OutboxRecord, policy: Policy, critic, logs: Path, looked_up: list[str]) -> int:
+    """Shadow review of the final record: logged, never applied. Returns the LLM calls used."""
+    t0 = time.monotonic()
+    try:
+        result, tokens = critique(email, record, policy, critic, looked_up)
+    except Exception as exc:  # the critic must never break a row
+        log_step(logs, email.id, 0, "rule", "reflect_failed", f"critic failed: {type(exc).__name__}")
+        return 0
+    issues = [i.model_dump() for i in result.issues]
+    reason = "critic: ok" if result.verdict == "ok" else f"critic: {len(issues)} concern(s): " + ", ".join(i["aspect"] for i in issues)
+    log_step(logs, email.id, 0, "model", "reflect", reason, latency_ms=int((time.monotonic() - t0) * 1000),
+             meta={"verdict": result.verdict, "issues": issues, **tokens})
+    return 1
+
+
+def run_email(email: EmailIn, model, policy: Policy, logs: Path, critic=None) -> tuple[OutboxRecord, int]:
+    """Run the graph for one email. Returns (record, llm_calls). Never raises. `critic` enables the shadow review."""
     (logs / f"{email.id}.jsonl").unlink(missing_ok=True)  # one log per run, so the timeline is never mixed with old runs
     if not (email.body.strip() or email.subject.strip()):
         reason = "; ".join(email.load_warnings) or "no usable text"
         log_step(logs, email.id, 0, "rule", "fallback", reason)
         return fallback_record(email, reason), 0
+    hints = preflags(email)
+    meta = context_meta(policy, email, hints)
+    log_step(logs, email.id, 0, "rule", "context", f"context built: about {meta['approx_tokens']} tokens, {len(hints)} hint(s)", meta=meta)
     state: GraphState = {
         "email": email,
-        "messages": [SystemMessage(build_system_prompt(policy)), HumanMessage(build_email_block(email, preflags(email)))],
+        "messages": [SystemMessage(build_system_prompt(policy)), HumanMessage(build_email_block(email, hints))],
         "looked_up_codes": [], "revisions": 0, "record": None, "llm_calls": 0,
     }
     try:
@@ -120,7 +145,8 @@ def run_email(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[Outbox
         record, forced = post_check(email, final["record"])
         if forced:
             log_step(logs, email.id, final["llm_calls"], "rule", "safety_net", f"forced escalation: {record.escalation_reason}")
-        return record, final["llm_calls"]
+        extra = _reflect(email, record, policy, critic, logs, final["looked_up_codes"]) if critic and record.confidence > 0.0 else 0  # not for fallback rows
+        return record, final["llm_calls"] + extra
     except Exception as exc:  # fail soft: every email gets a row
         reason = f"{type(exc).__name__}"
         log_step(logs, email.id, 0, "rule", "fallback", f"graph error: {reason}")

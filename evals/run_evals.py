@@ -7,6 +7,7 @@
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -50,10 +51,19 @@ def expected_checks(row: dict, expected: dict) -> list[str]:
     return fails
 
 
+def save_results(mode: str, results: list[dict], calls: int = 0) -> None:
+    """logs/evals/results-<mode>.json, read by GET /api/evals (the Quality page)."""
+    out = load_settings().logs / "evals" / f"results-{mode}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"ts": datetime.now(timezone.utc).isoformat(), "llm_calls": calls, "total": len(results),
+                               "failed": sum(not r["passed"] for r in results), "cases": results}, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
 def run_cases(folder: Path) -> int:
     settings = load_settings()
     policy, model = Policy.parse(settings.policy), make_llm(settings)
     failed = calls = 0
+    results: list[dict] = []
     for path in sorted(folder.glob("*.json")):
         email = load_email(path)
         expected = json.loads(path.read_text(encoding="utf-8")).get("expected", {})
@@ -61,10 +71,13 @@ def run_cases(folder: Path) -> int:
         calls += n
         problems = property_checks(record.model_dump(), email, policy) + expected_checks(record.model_dump(), expected)
         failed += bool(problems)
+        results.append({"id": email.id, "passed": not problems, "problems": problems, "category": record.category,
+                        "priority": record.priority, "escalate": record.escalate, "refs": record.policy_refs})
         print(f"{'FAIL' if problems else 'ok  '} {email.id}: {record.category}/{record.priority} esc={record.escalate} refs={record.policy_refs}")
         for p in problems:
             print(f"       - {p}")
     print(f"\n{failed} of {len(list(folder.glob('*.json')))} cases failed. LLM calls: {calls}")
+    save_results("heldout" if folder.name == "heldout" else "cases", results, calls)
     return failed
 
 

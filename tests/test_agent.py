@@ -113,3 +113,61 @@ def test_escalation_needs_a_policy_code_in_refs():
     cited = OutboxRecord(**base, policy_refs=["ESC-6"], reply_draft="Dear Sara, flagged (ESC-6). Student Helpdesk")
     assert "NO_POLICY_CODE" in {i.code for i in validate(bare, EMAIL, POLICY, [])}
     assert "NO_POLICY_CODE" not in {i.code for i in validate(cited, EMAIL, POLICY, [])}
+
+
+def test_log_has_context_row_and_token_meta(tmp_path):
+    import json
+
+    class Counting(FakeModel):
+        def invoke(self, messages):
+            ai = super().invoke(messages)
+            ai.usage_metadata = {"input_tokens": 100, "output_tokens": 7, "total_tokens": 107}
+            return ai
+
+    model = Counting([("LookupPolicy", {"reason": "fees", "section": "Fees"}), ("Submit", submit_args())])
+    run_email(EMAIL, model, POLICY, tmp_path)
+    rows = [json.loads(line) for line in (tmp_path / "T1.jsonl").read_text(encoding="utf-8").splitlines()]
+    ctx = rows[0]
+    assert ctx["action"] == "context" and ctx["step"] == 0
+    assert ctx["meta"]["approx_tokens"] > 0 and ctx["meta"]["always_on_policy_chars"] > 0 and ctx["meta"]["truncated"] is False
+    assert [r["meta"] for r in rows if r["decided_by"] == "model"] == [{"input_tokens": 100, "output_tokens": 7}] * 2
+    lookup = next(r for r in rows if r["action"] == "lookup_result")
+    assert lookup["meta"]["codes"] and lookup["meta"]["chars"] > 0
+
+
+class FakeCritic:
+    def __init__(self, result=None, error=None):
+        self.result, self.error = result, error
+
+    def invoke(self, messages):
+        if self.error:
+            raise self.error
+        return {"parsed": self.result, "raw": None, "parsing_error": None}
+
+
+def _run_with(critic, tmp_path):
+    model = FakeModel([("LookupPolicy", {"reason": "fees", "section": "Fees"}), ("Submit", submit_args())])
+    return run_email(EMAIL, model, POLICY, tmp_path, critic)
+
+
+def test_critic_is_logged_but_never_changes_the_record(tmp_path):
+    import json
+
+    from app.reflect import Concern, Critique
+
+    base, n0 = _run_with(None, tmp_path / "a")
+    verdict = Critique(verdict="concerns", issues=[Concern(aspect="over_promising", note="promises a fast reply")])
+    rec, n1 = _run_with(FakeCritic(verdict), tmp_path / "b")
+    assert rec == base and n1 == n0 + 1
+    row = [json.loads(x) for x in (tmp_path / "b" / "T1.jsonl").read_text(encoding="utf-8").splitlines()][-1]
+    assert row["action"] == "reflect" and row["meta"]["verdict"] == "concerns" and row["meta"]["issues"][0]["aspect"] == "over_promising"
+
+
+def test_critic_failure_is_logged_and_row_unchanged(tmp_path):
+    import json
+
+    base, n0 = _run_with(None, tmp_path / "a")
+    rec, n1 = _run_with(FakeCritic(error=RuntimeError("503")), tmp_path / "b")
+    assert rec == base and n1 == n0
+    last = json.loads((tmp_path / "b" / "T1.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+    assert last["action"] == "reflect_failed"

@@ -11,12 +11,15 @@ from datetime import datetime
 from pathlib import Path
 
 import agent
-from app.config import Settings
+from app.config import BODY_LIMIT, MAX_STEPS, WORD_LIMIT, Settings
+from app.graph import MAX_REVISIONS
 from app.llm import make_llm
 from app.loader import load_email, load_inbox
 from app.models import EmailIn, OutboxRecord
 from app.policy import Policy
+from app.reflect import make_critic, reflect_enabled
 from app.writer import write_outbox
+from backend.metrics import aggregate
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
@@ -38,6 +41,7 @@ class Service:
         self.s = settings
         self.policy = Policy.parse(settings.policy)
         self.model = model if model is not None else self._make_model()
+        self.critic = self._make_critic() if model is None and self.model is not None else None  # tests inject a model and get no critic
         self._pool = ThreadPoolExecutor(max_workers=1)  # one run at a time; the next waits its turn
         self._lock = threading.Lock()  # guards _state
         self._io = threading.Lock()  # guards the outbox.json read-modify-write
@@ -47,6 +51,14 @@ class Service:
         try:
             return make_llm(self.s)
         except Exception:  # e.g. missing key: runs still write fallback rows, like the CLI
+            return None
+
+    def _make_critic(self):
+        if not reflect_enabled():
+            return None
+        try:
+            return make_critic(self.s)
+        except Exception:
             return None
 
     # ---- reads -------------------------------------------------------------------------------
@@ -106,6 +118,42 @@ class Service:
                 "needs_human_fallback": sum(1 for r in rows if r["confidence"] == 0.0),
                 "avg_confidence": round(sum(r["confidence"] for r in rows) / len(rows), 2) if rows else 0.0,
                 "by_category": count("category"), "by_priority": count("priority")}
+
+    def metrics(self) -> dict:
+        """Observability numbers aggregated from logs/*.jsonl (the latest run of each email)."""
+        return aggregate({p.stem: self.steps(p.stem) for p in sorted(self.s.logs.glob("*.jsonl"))})
+
+    def harness(self) -> dict:
+        """The guard rails around the model, from the real constants (shown on the Observability page)."""
+        return {"model": self.s.model, "temperature": 0, "timeout_s": 30, "sdk_retries": 3, "workers": self.s.workers,
+                "max_model_turns": MAX_STEPS, "max_revisions": MAX_REVISIONS, "word_limit": WORD_LIMIT, "body_limit_chars": BODY_LIMIT,
+                "reflection": self.critic is not None,
+                "guards": [
+                    {"name": "Schema", "detail": "Submit arguments must parse into the 9-field record."},
+                    {"name": "Validators", "detail": "Hard checks on every submit (word limit, sign-off, real and looked-up policy codes, no invented contacts, escalation reason, policy code on escalations). Failures go back to the model."},
+                    {"name": "Safety net", "detail": "Life-safety wording forces escalation (ESC-1, ESC-3) after the model decides."},
+                    {"name": "Budgets", "detail": f"At most {MAX_STEPS} model turns and {MAX_REVISIONS} revisions per email."},
+                    {"name": "Fallback row", "detail": "Any failure writes a safe escalating row; every email always gets a row."},
+                    {"name": "Reflection", "detail": "A second model reviews the final record in shadow mode; it is logged and never changes the row."}]}
+
+    def evals(self) -> dict:
+        """Saved eval runs (tuning, held-out) plus a free live property check over the current outbox."""
+        from evals.run_evals import property_checks
+
+        saved = {}
+        for mode in ("cases", "heldout"):
+            try:
+                saved[mode] = json.loads((self.s.logs / "evals" / f"results-{mode}.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                saved[mode] = None
+        policy, live = self.policy, []
+        for row in self.outbox_rows():
+            try:
+                problems = property_checks(row, load_email(self._path(row["email_id"])), policy)
+            except NotFound:
+                continue
+            live.append({"id": row["email_id"], "passed": not problems, "problems": problems})
+        return {"saved": saved, "live": {"checked": len(live), "failed": sum(not r["passed"] for r in live), "rows": live}}
 
     def policy_view(self) -> list[dict]:
         return [{"section": name, "clauses": [{"code": c.code, "text": c.text} for c in self.policy.section(name)]}
@@ -184,7 +232,7 @@ class Service:
             self._state.update(running=True, total=len(todo), done=0, llm_calls=0, pending_ids=[e.id for e in todo])
         by_id = {e.id: e for e in todo}
         with ThreadPoolExecutor(max_workers=self.s.workers) as pool:
-            futures = [pool.submit(agent.process, e, self.model, self.policy, self.s.logs) for e in todo]
+            futures = [pool.submit(agent.process, e, self.model, self.policy, self.s.logs, self.critic) for e in todo]
             for future in as_completed(futures):
                 record, calls = future.result()
                 self._save(record, by_id[record.email_id])

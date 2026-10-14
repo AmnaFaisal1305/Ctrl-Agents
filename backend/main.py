@@ -145,6 +145,21 @@ def stats(request: Request) -> dict:
     return svc(request).stats()
 
 
+@app.get("/api/metrics")
+def metrics(request: Request) -> dict:
+    return svc(request).metrics()
+
+
+@app.get("/api/harness")
+def harness(request: Request) -> dict:
+    return svc(request).harness()
+
+
+@app.get("/api/evals")
+def evals(request: Request) -> dict:
+    return svc(request).evals()
+
+
 @app.get("/api/policy")
 def policy(request: Request) -> list[dict]:
     return svc(request).policy_view()

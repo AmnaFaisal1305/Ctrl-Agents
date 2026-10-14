@@ -101,7 +101,7 @@ def test_reprocess_replaces_row_and_log(tmp_path):
     svc.reprocess(email_id)
     svc.wait_idle()
     assert len(svc.outbox_rows()) == 1
-    assert [s["step"] for s in svc.steps(email_id)] == [1, 1, 2, 2]  # one run's log, not two appended
+    assert [s["step"] for s in svc.steps(email_id)] == [0, 1, 1, 2, 2]  # context row + one run's log, not two appended
 
 
 def test_delete_only_web_emails(tmp_path):
@@ -201,3 +201,33 @@ def test_api_key_is_optional_and_checked_when_set(monkeypatch):
     main.require_key(req(headers={"X-API-Key": "s3cret"}))
     main.require_key(req("/api/events", query="api_key=s3cret"))
     main.require_key(req("/api/health"))  # health stays open
+
+
+def test_metrics_from_a_real_run_and_synthetic_rows(tmp_path):
+    from backend.metrics import aggregate
+
+    svc = make_service(tmp_path, [("Submit", submit_args(reply_draft="no sign off")),
+                                  ("LookupPolicy", {"reason": "fees", "section": "Fees"}), ("Submit", submit_args())])
+    email_id = svc.create_email("Sara", "", "Late fee", "Please waive my late fee.")
+    svc.start_run([email_id])
+    svc.wait_idle()
+    m = svc.metrics()
+    assert m["emails"] == 1 and m["llm_calls"] == 3
+    assert m["recovery"]["self_healed"] == 1 and m["recovery"]["rejections_by_code"]["SIGN_OFF"] == 1
+    assert m["tool_usage"] == {"Submit": 2, "LookupPolicy": 1} and m["per_email"][0]["outcome"] == "accepted"
+    rows = {"a": [{"action": "reflect", "decided_by": "model", "latency_ms": 900, "meta": {"verdict": "concerns", "issues": [{"aspect": "tone"}], "input_tokens": 5, "output_tokens": 6}},
+                  {"action": "fallback", "decided_by": "rule", "reason": "x"}]}
+    agg = aggregate(rows)
+    assert agg["critic"] == {"verdicts": {"concerns": 1}, "aspects": {"tone": 1}} and agg["outcomes"] == {"fallback": 1}
+    assert agg["input_tokens"] == 5 and aggregate({})["emails"] == 0
+
+
+def test_harness_and_evals_views(tmp_path):
+    svc = make_service(tmp_path)
+    h = svc.harness()
+    assert h["max_model_turns"] == 6 and h["reflection"] is False and len(h["guards"]) >= 5
+    email_id = svc.create_email("Sara", "", "Late fee", "Please waive my late fee.")
+    svc.start_run([email_id])
+    svc.wait_idle()
+    ev = svc.evals()
+    assert ev["live"]["checked"] == 1 and ev["live"]["failed"] == 0 and set(ev["saved"]) == {"cases", "heldout"}

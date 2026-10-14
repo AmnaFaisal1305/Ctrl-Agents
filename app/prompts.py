@@ -34,6 +34,18 @@ def build_system_prompt(policy: Policy) -> str:
     return _RULES.replace("@@ALWAYS_ON@@", always_on)
 
 
+def context_meta(policy: Policy, email: EmailIn, hints: list[str]) -> dict:
+    """Sizes of what the model sees on turn 1 (observability only). Tokens are chars/4: an estimate."""
+    always_on = sum(len(policy.raw_sections.get(n, "")) for n in ("Escalation rules", "Reply rules"))
+    system = len(build_system_prompt(policy))
+    block = len(build_email_block(email, hints))
+    hint_chars = sum(len(h) for h in hints)
+    return {"system_chars": system - always_on, "always_on_policy_chars": always_on, "email_chars": block - hint_chars,
+            "hint_chars": hint_chars, "hints": hints, "body_chars": len(email.body),
+            "truncated": any("shortened" in w.lower() for w in email.load_warnings),
+            "approx_tokens": (system + block) // 4}
+
+
 def build_email_block(email: EmailIn, hints: list[str] | None = None) -> str:
     body = email.body.replace("</email>", "")
     hint_text = "".join(f"\nHINT (advisory, you decide): {h}" for h in hints or [])
