@@ -1,139 +1,108 @@
 # HANDOFF.md
 
-Updated at the end of every session. Newest session at the top. Keep it short and factual.
+Session state. **Section A is the single up-to-date picture; read it first.** Section B is the short history, newest first. Update both at the end of every session.
 
-## Session 2c (backend completed)
+Last updated: 2026-10-14, end of session 2. Everything below is committed (latest commit `2ee6d18`) except this file.
 
-**Done:** `POST /api/emails/{id}/reprocess`, `DELETE /api/emails/{id}` (only `web-*`, never sample or Gmail mail), `GET /api/outbox`, `POST /api/gmail/fetch` (409 until `secrets/token.json` exists; drafts only with `create_drafts: true`), run state `error` field (a failed run no longer dies silently), lock around outbox writes, unknown ids rejected. `frontend/Design.md` API table updated.
-**Verified live (real server, real Gemini):** add email, 2 LLM calls, `FEE-3`; reprocess gives a single-run log (4 steps, not 8); outbox endpoint 21 rows x 9 keys; DELETE sample returns 409, unknown returns 404, bad process ids 422; delete of a web email 204; `/api/gmail/fetch` ran read-only against the real token and found 0 messages, no error. `pytest`: 42 passed (Gmail mocked in tests; one test run earlier hit the real token read-only by mistake and was isolated).
-**Not verified:** Gmail fetch with real messages, and `create_drafts: true` against real Gmail (label still empty). No HTTP-client tests (route functions are called directly to avoid adding `httpx`).
-**Next:** frontend (teammate); user adds Gmail test emails, then I verify fetch + drafts + empty Sent; optional `--watch`.
+---
 
-## Session 2b (FastAPI backend + frontend brief)
+# A. Current state
 
-**Date:** 2026-10-14. Decisions (asked, user chose the recommended options): API scope = dashboard + submit + run; in-process import of `app/` (stays at repo root, CLI unchanged); `fastapi` and `uvicorn` added and pinned; live updates via SSE.
+## A1. Where we are
+| Area | State | Evidence (last real run) |
+|---|---|---|
+| Agent (`app/`, `agent.py`) | **Done.** P0 and P1 gates passed. | 20 samples: 20 valid rows, 0 fallbacks, about 41 LLM calls, about 1 minute. `evals --outbox`: 0 problems. Tuning cases 12 of 12; held-out 8 of 8 (after fixes, see C). |
+| Backend (`backend/`) | **Done.** FastAPI, SSE, in-process agent. | Live server run with real Gemini: add, process, reprocess, delete, outbox, stats, SSE, error codes all OK. |
+| Gmail | **Code done, unverified with real mail.** Read-only fetch ran against the real token and found 0 messages. | Label `helpdesk` is empty. Drafts never created for real. |
+| Frontend (`frontend/`) | **Not started** (teammate). Brief is in `frontend/Design.md`. | Folder holds `Design.md` and `.gitkeep`. |
+| Tests | `pytest`: **42 passed** (LLM and Gmail mocked). | |
+| Submission | **Not prepared** (freeze checklist below). | |
 
-### Done
-- `backend/main.py` (routes, CORS for localhost:5173) and `backend/service.py` (list/detail/stats/policy, create email file, one-at-a-time run queue reusing `agent.process`, `LogTail` for SSE). `tests/test_backend.py` (10 tests, fake model, no HTTP client dependency).
-- `frontend/Design.md` (screens, visual language, states, data shapes, API table, safety rules) for the teammate; `frontend/` otherwise empty.
-- `run_email` clears the email's old log at start (each log is one run, so the timeline is clean).
-- Verified live: server started, `/api/health`, `/api/stats`, `/api/emails` OK; `POST /api/emails` processed a new hazard email (escalated, 2 LLM calls) and the SSE stream showed `run` start, 4 `step` events, `run` done; unsafe ids (`../secrets`) and unknown ids give 404, empty POST gives 422. Test email and its row were removed afterwards.
-- `pytest`: 36 passed.
+Hard rules status: one command `python agent.py` works; 9 output fields only; nothing sent (a test greps for send calls, none in `app/`, `agent.py`, `backend/`); email text treated as data; secrets and `.env` untracked.
 
-### Not done / notes
-- Gmail trigger endpoint not built (Gmail still unverified; OAuth browser flow does not suit a server thread). No auth: local demo only, bind to localhost.
-- `POST /api/emails` writes `data/inbox/web-*.json` (gitignored); these rows also appear in `outbox.json` and a later `python agent.py` will process them too.
-- Frontend not started (teammate). Backend run command: `uvicorn backend.main:app --port 8000` from the repo root.
+## A2. Pending items (in order)
+1. **Gmail verification (needs you).** Create Gmail label `helpdesk` with 3 to 5 throwaway emails. Then: `python agent.py --gmail --no-drafts` (messages land in `data/inbox/`, rows in `outbox.json`), then `python agent.py --gmail` (drafts appear in Gmail, **Sent is empty**), then `POST /api/gmail/fetch` with `create_drafts` true and false. Check the reply drafts thread correctly and are not duplicated on re-run.
+2. **Frontend (teammate).** Build from `frontend/Design.md` against `uvicorn backend.main:app --port 8000`. Deliverables: runs with `npm install && npm run dev`, a short `frontend/README.md`, screens 2.1 to 2.4 working, all states handled, demo script works. Then do one integration pass together (dashboard, submit, live timeline, copy reply).
+3. **Docs drift to fix (needs your decision, see A3-1).** `ARCHITECTURE.md` sections 9 (P2/P3), 12 (Dashboard decision) and the modules table still mention Streamlit first, `web/` and `--export-web`; `CLAUDE.md` Commands and tables still list `streamlit run dashboard/streamlit_app.py`; empty `dashboard/` folder is still tracked.
+4. **Freeze and submission** (`ARCHITECTURE.md` section 13):
+   - [ ] Final full run, then refresh `samples/outbox.json` and `samples/logs/` from it (they currently come from the run before the backend work; same agent code).
+   - [ ] Remove any `data/inbox/web-*.json` test files and matching `outbox.json` rows so the delivered inbox is exactly the intended emails.
+   - [ ] Delete `docs/credentials` (ignored by git, never read, would be included by a plain folder zip).
+   - [ ] Fresh-clone test in an empty folder using only README steps (venv, `pip install -r requirements.txt`, `.env`, `python agent.py`).
+   - [ ] Re-authorize Gmail shortly before the demo (Testing-mode token lasts 7 days).
+   - [ ] `git archive -o AgentSprint_<TeamName>.zip HEAD`; confirm no `.env`, `secrets/`, `.cache/`, `__pycache__/`, `node_modules/`.
+   - [ ] Presentation notes: live run, fixed-vs-agent table, one decision timeline, an escalation case, an injection case, drop a new email and re-run (`--only-new` or the UI), one honest failure (H06 or the markdown/Roman Urdu fixes) and why it happened.
+   - [ ] Email the zip before the deadline named in the task statement (the checklist says 3 PM; confirm); edit nothing afterwards.
+5. **Optional, only if time and still wanted:** see A4.
 
-## Session 2 (P0.2 + P0.3 + P1: agent finalized)
+## A3. Open questions (need an answer from you or the organizers)
+1. **Streamlit vs React:** the React frontend replaces the planned Streamlit dashboard. Drop `dashboard/` and Streamlit from the docs, or keep Streamlit as a fallback? Recommended: drop it and update the docs (item A2-3).
+2. **Team size:** the statement says 3 to 4 people; you are 2. Confirm with the organizers that this is approved.
+3. **Gemini key sharing:** the paid key is now in `.env` (7 rapid calls succeeded, no 429). Confirm whether the organizers expect their own key at judging, and whether it will be shared (quota and the 5 per minute free-tier limit we hit earlier).
+4. **Gmail account:** a personal Gmail is used (mitigations: narrow `label:helpdesk` query, readonly plus compose scopes only). A dedicated test account is safer; decide before the demo.
+5. **Backend access:** the API has no authentication and CORS allows only `localhost:5173`. Is "local demo only, bound to localhost" acceptable, or do you want a simple API key?
+6. **Frontend language:** TypeScript is recommended in `Design.md`; teammate to confirm.
 
-**Date:** 2026-10-14
+## A4. Optional and deferred work (not started, none required for the gates)
+| Item | Why deferred | Where |
+|---|---|---|
+| `--watch` (poll `data/inbox/` every 2 s) | UI "Process" and `--only-new` already cover the live demo | `ARCHITECTURE.md` P2 |
+| `find_related_emails` tool | Overdue complaints (E004, E019, E020) already pass from what the email states | `app/tools.py` stub raises `NotImplementedError("P1")` |
+| Second model or provider fallback | Not needed so far; SDK retries cover 429 | `ARCHITECTURE.md` section 8 |
+| Policy `query` fallback to the best-matching section | Rare-word weighting fixed the observed miss; zero-overlap still returns a "try these sections" message | `app/policy.py` |
+| Language-match soft validator | Prompt handles Roman Urdu (E016 verified); no code check | `app/validators.py` |
+| Safety net: re-ask the model once before forcing | Forces directly (marked `shortcut:`); false positives possible | `app/safety.py` |
+| `escalation_reason` must name an office (code only checks for an ESC code) | Prompt asks for it; all 20 rows comply | `app/validators.py` |
+| HTTP-level tests with a client | Would add `httpx`; route functions are tested directly | `tests/test_backend.py` |
+| Dev-only LLM response cache | Not needed at paid-key speed | `ARCHITECTURE.md` section 8 |
+| Move `secrets/` out of OneDrive (`SECRETS_DIR`) | It syncs to the cloud | `.env.example` |
+| `ponytail`-style `shortcut:` ledger | Shortcuts are marked in code with `shortcut:` comments | `app/policy.py`, `app/safety.py` |
 
-### Status
-- **Gate 1, Gate 2 and Gate 3 reached** with real Gemini (`gemini-2.5-flash`, paid key in `.env`). The agent is functionally complete. Remaining: Gmail verification with real mail, optional P2 dashboard and `--watch`, freeze checklist.
+## A5. Known issues and risks
+- **Run-to-run variation:** LLM output is not identical across runs (confidence 0.9 vs 0.5, E010 priority and escalation changed after tuning). Re-run the 20 and read the replies once more before presenting.
+- **Mild over-commitment:** some replies start with "Yes, it is possible..." (E002); policy-faithful but worth a last read.
+- **Safety net false positives:** trigger words such as "fire" or "fainted" force an escalation even in a harmless context.
+- **Held-out set is partly used:** H06 was fixed after it failed, so only H01 to H05, H07 and H08 are clean held-out evidence.
+- **OAuth token expiry:** Testing-mode token lasts 7 days; on `invalid_grant` delete `secrets/token.json` and re-run `--gmail`.
+- **Extra inbox files:** `POST /api/emails` writes `data/inbox/web-*.json`; a later `python agent.py` will process them too (they are gitignored, so not in the zip).
+- **Line endings:** git prints LF to CRLF warnings on this Windows machine; harmless.
+- **Live demo speed:** about 3 to 10 seconds per email, about 1 minute for 20; a 429 would show a retry line in the log (say so out loud, do not hide it).
 
-### Done
-- P0.2: `tools`, `validators`, `prompts`, `llm`, `graph` (agent / tools / submit / fail nodes, 6 turns, 2 revisions, then fallback). `agent.py` runs it, prints the real LLM call count, and falls back per email on any error.
-- P0.3: all 20 samples run; every reply read by hand; prompt and validator tuned (ESC code required in `escalation_reason`, no markdown, Roman Urdu replies, no unsupported promises, look up every issue, ESC-3 only for real distress).
-- P1: `app/safety.py` (advisory pre-flags for hazard, wellbeing, injection; life-safety net forces `escalate` + high priority, logged as `decided_by: rule`), `--only-new` (hashes in `logs/seen.json`), `evals/run_evals.py` with `--outbox`, tuning cases (12) and held-out cases (8), policy `query` lookup now weights rare words and ignores stopwords, loader keeps head and tail of bodies over 4000 chars.
-- Repo: `.gitignore` extended; `README.md` has the approach note, test commands and the zip command; `samples/outbox.json` and `samples/logs/` are tracked sample outputs.
-- Commits: `4074b51` (agent + Gate 1) and a second commit with everything after it.
+## A6. How to run and verify
+```
+.venv\Scripts\activate
+pytest -q                                   # 42 passed
+python agent.py                             # all emails -> outbox.json, prints LLM call count
+python agent.py --only-new                  # reuse rows for unchanged emails (0 calls)
+python evals/run_evals.py --outbox          # property checks on outbox.json, no LLM
+python evals/run_evals.py                   # 12 tuning cases (real LLM, about 25 calls)
+python evals/run_evals.py --heldout         # 8 held-out cases; run once at the gate, not while tuning
+python agent.py --gmail --no-drafts         # Gmail fetch (needs label emails) then process
+uvicorn backend.main:app --port 8000        # API for the frontend; docs at /docs
+```
+Quota discipline: single emails while tuning; the full sets only at gates.
 
-### In progress
-- Nothing.
+## A7. Key files and design decisions
+- Loop: `app/graph.py` (LangGraph: agent, tools, submit, fail). Model tools are named `LookupPolicy` and `Submit`. 6 model turns max, 2 revisions, then fallback row (escalates, confidence 0.0).
+- Prompt: `app/prompts.py` (ESC and Reply rules verbatim, email in `<email>` tags, advisory hints). Validators: `app/validators.py`. Safety: `app/safety.py`.
+- Backend: `backend/main.py` (routes), `backend/service.py` (logic, one run at a time, `LogTail` for SSE). API table: `frontend/Design.md` section 7.
+- Frontend brief: `frontend/Design.md`. Design source of truth: `ARCHITECTURE.md`. Rules: `CLAUDE.md` (no `superpowers:*` skills here).
+- Untracked on purpose: `.env`, `secrets/`, `logs/`, `outbox.json`, fetched Gmail and `web-*` emails, `.agents/`, `.claude/`, `skills-lock.json`.
 
-### Next steps (in order)
-1. **User:** create Gmail label `helpdesk` with 3 to 5 throwaway emails; I run `--gmail --no-drafts`, then `--gmail`; confirm drafts appear and Sent is empty.
-2. Optional P2: `--watch` and `dashboard/streamlit_app.py` (needs `streamlit`: ask before adding the dependency).
-3. Optional: `find_related_emails` (P1, not implemented), second-model fallback.
-4. Freeze: refresh `samples/` from a final run, fresh-clone test, delete `docs/credentials`, zip with `git archive`.
+---
 
-### Blockers and open questions
-- Gmail label still empty/missing; real fetch and drafts are **unverified**.
-- Team size and whether the key is shared are still unconfirmed with organizers.
-- `docs/credentials` (ignored, never read) is still on disk; delete or move it before any plain folder zip.
+# B. Session history (newest first)
 
-### Assumptions made
-- Tool names the model sees are `LookupPolicy` and `Submit`.
-- Fallback rows escalate (design 5.4), so an empty or HTML-only email is escalated for a human; the eval runner exempts fallback rows from the ESC-code check.
-- Safety net forces escalation directly instead of re-asking the model once first (marked `shortcut:`); false positives are possible (for example "fire" in a non-hazard sense).
-- `find_related_emails` not implemented; overdue complaints rely on what the email states.
-- Replies are not code-checked for language match.
+## Session 2 (2026-10-14): agent finalized, backend built
+- P0.2: `tools`, `validators`, `prompts`, `llm`, `graph`, `agent.py` wired. First real run fell back because routing checked `"submit"` while the model's tool name is `Submit` (own mistake, fixed; tests used the wrong names too).
+- Free-tier key was limited to 5 requests per minute; you then added a paid key.
+- P0.3: all 20 replies read by hand; fixes for escalation without an ESC rule (E010), Roman Urdu (E016), markdown (E019), over-promising (E004, E005, E012).
+- P1: safety net and pre-flags, `--only-new`, evals (12 tuning + 8 held-out), rare-word policy lookup, head+tail body truncation. Held-out first failed 3 of 8: H07 and H08 were harness mistakes (fallback rows escalate by design); H06 exposed real weaknesses, fixed.
+- Repo organization: `.gitignore` extended, README approach note and zip command, `samples/`.
+- Backend: FastAPI app, SSE live steps, reprocess, delete (`web-*` only), `/api/outbox`, `/api/gmail/fetch` (drafts only on request, never send), run `error` field, outbox write lock; `frontend/Design.md` written; `fastapi` and `uvicorn` pinned.
+- Commits: `4074b51`, `d052fe4`, `6a5e400`, `2ee6d18`.
 
-### Files touched
-`.gitignore`, `README.md`, `agent.py`, `app/{graph,llm,loader,policy,prompts,safety,tools,validators}.py`, `evals/run_evals.py`, `evals/cases/*`, `evals/heldout/*`, `samples/*`, `tests/test_agent.py`, `tests/test_scaffold.py`, `HANDOFF.md`, `ARCHITECTURE.md`.
-
-### How to run and verify (last real results)
-- `pytest -q`: 26 passed.
-- `python agent.py`: 20 rows, about 41 LLM calls, about 1 minute, no fallbacks. `python agent.py --only-new` straight after: 20 reused, 0 calls.
-- `python evals/run_evals.py --outbox`: 0 problems over 20 rows.
-- `python evals/run_evals.py` (tuning): 12 of 12 pass.
-- `python evals/run_evals.py --heldout`: first run failed 3 of 8. H07 and H08 were harness mistakes (fallback rows escalate by design; their expectation and the ESC-code check were wrong). H06 (long email) exposed real issues (tail truncated, ESC-3 over-triggered, issue not looked up), fixed with head+tail truncation and two prompt lines, then passed 8 of 8. **H06 is therefore no longer a clean held-out case**; the other seven were not tuned on.
-- Not run: Gmail path, `--watch`, dashboard.
-
-### Known issues
-- Run-to-run variation: LLM output is not identical across runs (for example confidence 0.9 vs 0.5, E010 priority). The A-case regression after the prompt change was caused by weak keyword lookup (fixed), so lookup quality drives results.
-- Replies sometimes begin with "Yes" or similar mild commitments; spot-check before presenting.
-- Testing-mode OAuth token expires after 7 days (delete `secrets/token.json` on `invalid_grant`). `secrets/` is inside OneDrive.
-- `ARCHITECTURE.md` 6.1 "best-matching section" fallback is still not implemented (lookup with zero overlap returns the section list).
-
-### Notes for the other person
-- Treat as one workflow. No `superpowers:*` skills here. Never commit `.env`, `secrets/` or fetched Gmail files.
-
-## Session 1 (docs, scaffold, Gmail OAuth)
-
-**Date:** 2026-10-14
-**Who:** Ahmed (single-owner workflow; really two people)
-
-### Status
-- Phase / gate: P0.1 (skeleton) done. Gmail plumbing written and OAuth authorized. Next is **P0.2** (LLM graph). Gate 1 not attempted.
-- Tier in progress: P0.
-
-### Done
-- Deleted `docs/Mission.md` (stale duplicate of `ARCHITECTURE.md`).
-- `ARCHITECTURE.md` moved to LangGraph (`graph.py`, `GraphState`, native tool calling), `gemini-2.5-flash`, `GOOGLE_API_KEY`, Gmail section 5.5, single owner. `CLAUDE.md`: skills/MCP tables fixed, Gmail exception to the "never send" rule, single-owner rule, no `superpowers:*` skills.
-- Real code: `app/models`, `config`, `loader`, `policy`, `fallback`, `writer`, `logger`, `gmail`, and `agent.py` (stub agent: every email gets the fallback row). Typed stubs raising `NotImplementedError`: `tools`, `validators`, `llm`, `prompts`, `graph`, `safety`.
-- Gmail: OAuth desktop flow works (`secrets/token.json` created). `--gmail` fetches `GMAIL_QUERY` into `data/inbox/<gmail id>.json`; replies are saved as drafts (ids tracked in `logs/gmail_drafts.json` so re-runs don't duplicate); `--no-drafts` skips drafting. A test fails if any send call appears in the code.
-- Deps installed in `.venv` and pinned in `requirements.txt` (langgraph, langchain-core, langchain-google-genai, pydantic, python-dotenv, pytest, google-api-python-client, google-auth, google-auth-httplib2, google-auth-oauthlib).
-- `.env` exists with `GOOGLE_API_KEY` set (length checked only; **no Gemini call made yet**).
-- Commits: `55f1556` scaffold, `0ddf3ec` Gmail.
-
-### In progress
-- Nothing.
-
-### Next steps (in order)
-1. **User:** create Gmail label `helpdesk`, add 3 to 5 throwaway test emails to it.
-2. Run `python agent.py --gmail --no-drafts` and confirm the messages land in `data/inbox/` and in `outbox.json`. Then one `python agent.py --gmail` run; confirm in Gmail that drafts appear and **Sent is empty**.
-3. P0.2: look up current `langgraph` and `langchain-google-genai` docs (Context7, langchain skills `ecosystem-primer`, `langgraph-fundamentals`) and confirm `gemini-2.5-flash` is a valid ID with tool calling. Then write `llm.py`, `prompts.py`, `tools.py`, `validators.py`, `graph.py`. Test on E001 and E002 only (quota).
-4. Gate 1, then phase 0.3 (all 20, fix prompts, README approach note), then P1 to P3 per `ARCHITECTURE.md` section 9.
-5. Add `--no-drafts`-style dev flags only if needed; do not add features outside the current phase.
-
-### Blockers and open questions
-- Gmail label `helpdesk` is empty or missing: fetch returned **0** messages.
-- Is a team of two approved? Is the Gemini key shared across teams (429 risk)?
-- A personal Gmail is used; mitigation is the narrow `label:helpdesk` query plus readonly + compose scopes. A dedicated test account is safer.
-- `docs/credentials` (untracked, now gitignored) is probably a stray copy of the OAuth client file; the user should delete it or move it outside the repo.
-
-### Assumptions made
-- Model `gemini-2.5-flash`, key variable `GOOGLE_API_KEY` (no `check_env.py` or organizers' `requirements.txt` was available).
-- Bad or empty email files load as an empty `EmailIn` with `load_warnings`; `agent.py` turns them into fallback rows.
-- `app/fallback.py` added as a module (table updated). Gmail message id is used as the email `id`.
-- `policy.lookup(query=...)` returns nothing when no keyword overlaps (marked `shortcut:`); the best-matching-section fallback from `ARCHITECTURE.md` 6.1 is deferred.
-- Drafts are only created for mail fetched in the same `--gmail` run, never for the sample `E*.json` files.
-
-### Files touched
-`ARCHITECTURE.md`, `CLAUDE.md`, `HANDOFF.md`, `README.md`, `requirements.txt`, `.gitignore`, `.env.example`, `agent.py`, `app/*`, `tests/test_scaffold.py`, `tests/test_gmail.py`; deleted `docs/Mission.md`. Untracked and intentionally not committed: `.agents/`, `.claude/`, `skills-lock.json`.
-
-### How to run and verify
-- `.venv\Scripts\python -m pytest -q`: 14 passed.
-- `.venv\Scripts\python agent.py`: 20 fallback rows in `outbox.json`, nine keys each, "LLM calls: 0". A temp inbox with a malformed and an empty file gave one row each.
-- `.venv\Scripts\python agent.py --gmail --no-drafts`: OAuth succeeded, "Gmail: fetched 0 messages for query 'label:helpdesk'", then processed the 20 samples. Real message fetch and real draft creation are **unverified**.
-
-### Known issues
-- The agent is a stub; every email gets the fallback row, so any drafts would hold the holding text.
-- The Testing-mode OAuth token expires after 7 days: if `invalid_grant`, delete `secrets/token.json` and re-run `--gmail`.
-- `secrets/` lives inside OneDrive and syncs to the cloud; `SECRETS_DIR` in `.env` can point elsewhere.
-- `ARCHITECTURE.md` 6.1 query fallback to the best-matching section is not implemented.
-
-### Notes for the other person
-- Treat as one workflow. Do not use `superpowers:*` skills here. Never commit `.env`, `secrets/` or fetched Gmail files (all gitignored).
+## Session 1 (2026-10-14): docs, scaffold, Gmail OAuth
+- `ARCHITECTURE.md` moved to LangGraph, `gemini-2.5-flash`, `GOOGLE_API_KEY`, Gmail section 5.5, single owner; `docs/Mission.md` deleted; `CLAUDE.md` tables fixed.
+- Scaffold: `models`, `config`, `loader`, `policy`, `fallback`, `writer`, `logger`, `gmail`, stub agent. Gmail OAuth works; `--gmail` fetch and draft code written with a send-guard test.
+- Commits: `55f1556`, `0ddf3ec`.
