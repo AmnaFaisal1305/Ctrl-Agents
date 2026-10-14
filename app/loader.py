@@ -31,8 +31,11 @@ def load_email(path: Path) -> EmailIn:
             value = ""
         fields[key] = clean_text(value) if key in ("subject", "body") else value
     if len(fields["body"]) > BODY_LIMIT:
-        fields["body"] = fields["body"][:BODY_LIMIT]
-        warnings.append(f"body truncated to {BODY_LIMIT} characters")
+        # keep head and tail: the actual ask is often at the end of a long email
+        marker = " [...] "
+        head = 2500
+        fields["body"] = fields["body"][:head] + marker + fields["body"][-(BODY_LIMIT - head - len(marker)):]
+        warnings.append(f"body shortened to {BODY_LIMIT} characters (head and tail kept)")
     email_id = data.get("id")
     if not isinstance(email_id, str) or not email_id.strip():
         email_id = path.stem

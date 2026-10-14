@@ -1,0 +1,18 @@
+{
+  "id": "A10",
+  "from_name": "Faisal Dar",
+  "from_email": "a10@example.com",
+  "subject": "Refund",
+  "body": "I left in week 5 and want a refund of my fee.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "refs_any_of": [
+      "FEE-4"
+    ],
+    "must_not_contain": [
+      "will be refunded",
+      "we will refund"
+    ]
+  }
+}

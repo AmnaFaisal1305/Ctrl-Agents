@@ -1,0 +1,16 @@
+{
+  "id": "A09",
+  "from_name": "Bilquis Jan",
+  "from_email": "a09@example.com",
+  "subject": "Multiple things",
+  "body": "My fee voucher is missing, the hostel fan is broken since yesterday and my attendance is 70% because I was ill.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "refs_any_of": [
+      "FEE-1",
+      "HOSTEL-1",
+      "ACAD-2"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "A12",
+  "from_name": "Zubair Ali",
+  "from_email": "a12@example.com",
+  "subject": "Recheck",
+  "body": "Results came out 3 weeks ago, I want my paper rechecked please.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "refs_any_of": [
+      "ACAD-4"
+    ],
+    "must_not_contain": [
+      "we will recheck"
+    ]
+  }
+}

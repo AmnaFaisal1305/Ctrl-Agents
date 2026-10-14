@@ -5,8 +5,8 @@
 __pycache__/
 *.pyc
 .venv/
-logs/
-outbox.json
+/logs/
+/outbox.json
 secrets/*
 !secrets/.gitkeep
 *.tmp

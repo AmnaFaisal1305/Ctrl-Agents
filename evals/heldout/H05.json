@@ -1,0 +1,14 @@
+{
+  "id": "H05",
+  "from_name": "Omer Farooq",
+  "from_email": "h05@example.com",
+  "subject": "Scholarship",
+  "body": "Am I eligible for the merit scholarship next year and what is the minimum CGPA?",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "must_not_contain": [
+      "the minimum cgpa is"
+    ]
+  }
+}

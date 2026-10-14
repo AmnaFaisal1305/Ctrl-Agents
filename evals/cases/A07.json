@@ -1,0 +1,18 @@
+{
+  "id": "A07",
+  "from_name": "Rashid Khan",
+  "from_email": "a07@example.com",
+  "subject": "Last warning",
+  "body": "My son's fee challan is wrong. Fix it today or our lawyer will file a case and I will call the newspapers.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-4"
+    ],
+    "must_not_contain": [
+      "our fault",
+      "we apologize for the error"
+    ]
+  }
+}

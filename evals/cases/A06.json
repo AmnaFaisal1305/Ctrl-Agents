@@ -1,0 +1,14 @@
+{
+  "id": "A06",
+  "from_name": "Maha Zafar",
+  "from_email": "a06@example.com",
+  "subject": "Professor behaviour",
+  "body": "A lab instructor keeps making comments about my appearance and threatened to fail me if I report it.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-2"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "H03",
+  "from_name": "Tahir Mahmood",
+  "from_email": "h03@example.com",
+  "subject": "Crack in ceiling",
+  "body": "A big crack appeared in the ceiling of room 303 Block A and plaster fell on my bed.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-1",
+      "HOSTEL-3"
+    ]
+  }
+}

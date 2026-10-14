@@ -31,11 +31,29 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 
 ## Approach
 
-(To be completed in P0.3: fixed code vs agent decisions, the LangGraph loop, validators, safety, limitations. See `ARCHITECTURE.md`.)
+**Fixed code vs agent.** Fixed code finds and tolerates files, cleans text, parses the policy, serves lookups, validates, retries and falls back. The model (Gemini, temperature 0) decides category, priority, escalation, which policy to look up, and the reply. There is no logic keyed to email ids, subjects or sample text.
+
+**Loop (LangGraph, `app/graph.py`).** `agent` (model must call one tool per turn, with a reason) -> `tools` (`LookupPolicy`) -> `agent` ... -> `submit` (validators). A rejected submit sends the issues back for revision (max 2, max 6 model turns), then a safe fallback row is written. Every step is logged to `logs/<id>.jsonl` and the console.
+
+**Validators (`app/validators.py`).** Schema, under 150 words, sign-off `Student Helpdesk`, policy codes exist and were actually looked up, a code appears in the reply, escalation reason names an ESC rule, no invented phone/email/URL, no markdown, no copied email text.
+
+**Safety.** Email text is untrusted data in `<email>` tags; injection and hazard words only add advisory hints. A life-safety net (hazards, medical or hopelessness, English and Roman Urdu) forces `escalate: true` if the model missed it. Nothing is ever sent; Gmail is read plus drafts only.
+
+**Limitations.** Keyword policy lookup (no embeddings); replies are not language-checked by code; the safety net can over-escalate on a trigger word; bodies over 4,000 characters keep head and tail only; `find_related_emails` (earlier emails from the same sender) is not implemented, so overdue complaints rely on what the email itself says.
+
+## Tests and evals
+
+```
+pytest                                   # unit tests, LLM mocked
+python evals/run_evals.py --outbox       # property checks on outbox.json (no LLM)
+python evals/run_evals.py                # 12 adversarial tuning cases (real LLM)
+python evals/run_evals.py --heldout      # 8 held-out cases: run at the gate, not while tuning
+python agent.py --only-new               # reuse rows for unchanged emails
+```
 
 ## Status
 
-The LangGraph agent works end to end on the sample emails (Gate 1: E001 and E002 verified with real Gemini). Full 20-email run, prompt tuning, safety net and evals are still in progress; see `HANDOFF.md`.
+All 20 sample emails produce valid rows (about 40 LLM calls, about a minute). Sample output is in `samples/`. See `HANDOFF.md` for what remains (Gmail verification, optional dashboard).
 
 ## Building the submission zip
 

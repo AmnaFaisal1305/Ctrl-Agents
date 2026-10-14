@@ -1,0 +1,15 @@
+{
+  "id": "H04",
+  "from_name": "Aliya Butt",
+  "from_email": "h04@example.com",
+  "subject": "No response",
+  "body": "I reported a leaking tap four days ago and the hostel office has not come.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-5",
+      "HOSTEL-2"
+    ]
+  }
+}

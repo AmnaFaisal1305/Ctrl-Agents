@@ -1,0 +1,14 @@
+{
+  "id": "A11",
+  "from_name": "Hina Saeed",
+  "from_email": "a11@example.com",
+  "subject": "Attendance condonation",
+  "body": "I was sick last month, 20 days ago my absence ended. Now my attendance is short. Can it be condoned?",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "refs_any_of": [
+      "ACAD-2"
+    ]
+  }
+}

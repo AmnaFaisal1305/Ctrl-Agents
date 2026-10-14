@@ -7,6 +7,7 @@ from app.policy import Policy
 
 _CONTACT = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+|https?://\S+|www\.\S+|\+?\d[\d\s-]{6,}\d")
 SIGN_OFF = "Student Helpdesk"
+_ESC_CODE = re.compile(r"ESC-[1-6]")
 
 
 def _hard(code: str, message: str) -> Issue:
@@ -27,9 +28,8 @@ def validate(record: OutboxRecord, email: EmailIn, policy: Policy, looked_up_cod
             issues.append(_hard("NOT_LOOKED_UP", f"{code} was not returned by lookup_policy; look it up first or drop it."))
     if record.policy_refs and not any(c in reply for c in record.policy_refs):
         issues.append(_hard("CODE_NOT_IN_REPLY", "Mention at least one policy code from policy_refs in reply_draft."))
-    # shortcut: only checks the reason is non-empty, not that it names an office; upgrade if evals show vague reasons
-    if record.escalate and not record.escalation_reason.strip():
-        issues.append(_hard("ESCALATION_REASON", "escalate is true: escalation_reason must name the rule and the office."))
+    if record.escalate and not _ESC_CODE.search(record.escalation_reason):
+        issues.append(_hard("ESCALATION_REASON", "escalate is true: escalation_reason must start with the ESC code and name the office, e.g. 'ESC-5: overdue complaint; Hostel Warden'. If no ESC rule applies, set escalate to false."))
     if not record.escalate and record.escalation_reason.strip():
         issues.append(_hard("ESCALATION_REASON", "escalate is false: escalation_reason must be empty."))
     allowed = (" ".join(c.text for c in policy.clauses) + f" {email.subject} {email.body}").lower()
@@ -42,6 +42,8 @@ def validate(record: OutboxRecord, email: EmailIn, policy: Policy, looked_up_cod
     first = (email.from_name.split() or ["Student"])[0]
     if first.lower() not in reply[:80].lower():
         issues.append(Issue(severity="soft", code="GREETING", message=f"Greeting should use the name '{first}'."))
+    if "*" in reply or "#" in reply:
+        issues.append(_hard("MARKDOWN", "Reply must be plain text: remove asterisks and # characters."))
     if not 1 <= len(record.agent_notes) <= 400:
         issues.append(Issue(severity="soft", code="NOTES_LENGTH", message="agent_notes must be 1 to 400 characters."))
     return issues

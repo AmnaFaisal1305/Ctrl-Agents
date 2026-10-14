@@ -1,5 +1,6 @@
 """CLI entry: processes every data/inbox/*.json and writes outbox.json. Never crashes (R9)."""
 import argparse
+import hashlib
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -26,6 +27,21 @@ def process(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[OutboxRe
         return run_email(email, model, policy, logs)
     except Exception as exc:  # fail soft: every email gets a row
         return fallback_record(email, f"unexpected error: {type(exc).__name__}"), 0
+
+
+def email_hash(email: EmailIn) -> str:
+    return hashlib.sha256(f"{email.from_name}|{email.from_email}|{email.subject}|{email.body}".encode()).hexdigest()
+
+
+def reusable_rows(emails: list[EmailIn], outbox: Path, logs: Path) -> dict[str, OutboxRecord]:
+    """--only-new: rows from the last run for emails whose content is unchanged."""
+    seen_file = logs / "seen.json"
+    try:
+        seen = json.loads(seen_file.read_text(encoding="utf-8"))
+        rows = {r["email_id"]: OutboxRecord(**r) for r in json.loads(outbox.read_text(encoding="utf-8"))}
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+    return {e.id: rows[e.id] for e in emails if e.id in rows and seen.get(e.id) == email_hash(e)}
 
 
 def save_drafts(service, records: list[OutboxRecord], gmail_ids: set[str], logs: Path) -> None:
@@ -62,6 +78,7 @@ def main() -> int:
     ap.add_argument("--inbox", type=Path, default=settings.inbox)
     ap.add_argument("--out", type=Path, default=settings.outbox)
     ap.add_argument("--workers", type=int, default=settings.workers)
+    ap.add_argument("--only-new", action="store_true", help="reuse rows from the last run for unchanged emails")
     ap.add_argument("--gmail", action="store_true", help="fetch the Gmail query into the inbox, then save replies as drafts (never sent)")
     ap.add_argument("--no-drafts", action="store_true", help="with --gmail: fetch and process but do not create drafts")
     args = ap.parse_args()
@@ -70,18 +87,22 @@ def main() -> int:
     service, gmail_ids = gmail_fetch(settings) if args.gmail else (None, set())
     emails = load_inbox(settings.inbox)
     policy = Policy.parse(settings.policy)
+    reused = reusable_rows(emails, settings.outbox, settings.logs) if args.only_new else {}
+    todo = [e for e in emails if e.id not in reused]
     try:
         model = make_llm(settings)
     except Exception as exc:  # e.g. missing GOOGLE_API_KEY: every email still gets a fallback row
         print(f"LLM unavailable ({type(exc).__name__}); writing fallback rows", flush=True)
         model = None
     with ThreadPoolExecutor(max_workers=settings.workers) as pool:
-        results = list(pool.map(lambda e: process(e, model, policy, settings.logs), emails))
-    records = [r for r, _ in results]
+        results = list(pool.map(lambda e: process(e, model, policy, settings.logs), todo))
+    records = [r for r, _ in results] + list(reused.values())
+    settings.logs.mkdir(parents=True, exist_ok=True)
+    (settings.logs / "seen.json").write_text(json.dumps({e.id: email_hash(e) for e in emails}), encoding="utf-8")
     write_outbox(records, settings.outbox)
     if service and not args.no_drafts:
         save_drafts(service, records, gmail_ids, settings.logs)
-    print(f"Processed {len(records)} emails -> {settings.outbox}. LLM calls: {sum(n for _, n in results)}")
+    print(f"Processed {len(records)} emails ({len(reused)} reused) -> {settings.outbox}. LLM calls: {sum(n for _, n in results)}")
     return 0
 
 

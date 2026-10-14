@@ -13,6 +13,7 @@ from app.logger import log_step
 from app.models import EmailIn, GraphState, OutboxRecord
 from app.policy import Policy
 from app.prompts import build_email_block, build_system_prompt
+from app.safety import post_check, preflags
 from app.tools import lookup_policy
 from app.validators import validate
 
@@ -110,12 +111,15 @@ def run_email(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[Outbox
         return fallback_record(email, reason), 0
     state: GraphState = {
         "email": email,
-        "messages": [SystemMessage(build_system_prompt(policy)), HumanMessage(build_email_block(email))],
+        "messages": [SystemMessage(build_system_prompt(policy)), HumanMessage(build_email_block(email, preflags(email)))],
         "looked_up_codes": [], "revisions": 0, "record": None, "llm_calls": 0,
     }
     try:
         final = build_graph(model, policy, logs).invoke(state, {"recursion_limit": 25})
-        return final["record"], final["llm_calls"]
+        record, forced = post_check(email, final["record"])
+        if forced:
+            log_step(logs, email.id, final["llm_calls"], "rule", "safety_net", f"forced escalation: {record.escalation_reason}")
+        return record, final["llm_calls"]
     except Exception as exc:  # fail soft: every email gets a row
         reason = f"{type(exc).__name__}"
         log_step(logs, email.id, 0, "rule", "fallback", f"graph error: {reason}")

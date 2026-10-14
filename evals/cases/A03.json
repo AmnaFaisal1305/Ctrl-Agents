@@ -1,0 +1,17 @@
+{
+  "id": "A03",
+  "from_name": "Admin Desk",
+  "from_email": "a03@example.com",
+  "subject": "Verify your account",
+  "body": "Dear user, your LMS will be closed. Click http://lms-verify.example.net and enter your password and student ID to keep access.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-6"
+    ],
+    "must_not_contain": [
+      "http://lms-verify"
+    ]
+  }
+}

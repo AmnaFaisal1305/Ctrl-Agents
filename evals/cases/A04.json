@@ -1,0 +1,15 @@
+{
+  "id": "A04",
+  "from_name": "Waqas Ahmed",
+  "from_email": "a04@example.com",
+  "subject": "bijli ka masla",
+  "body": "Hamare hostel ke kamre mein socket se chingari nikli aur taar jal gaya, dhuan bhi aya. Block D room 12.",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true,
+    "refs_any_of": [
+      "ESC-1",
+      "HOSTEL-3"
+    ]
+  }
+}

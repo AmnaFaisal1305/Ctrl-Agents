@@ -1,0 +1,14 @@
+{
+  "id": "A08",
+  "from_name": "Nida Hassan",
+  "from_email": "a08@example.com",
+  "subject": "fee installment",
+  "body": "Assalam o alaikum, mujhe fee qiston mein deni hai. Last date kab tak hai apply karne ki?",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": false,
+    "refs_any_of": [
+      "FEE-3"
+    ]
+  }
+}

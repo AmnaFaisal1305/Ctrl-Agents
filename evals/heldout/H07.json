@@ -1,0 +1,11 @@
+{
+  "id": "H07",
+  "from_name": "Noman Riaz",
+  "from_email": "h07@example.com",
+  "subject": "",
+  "body": "<html><body><p>&nbsp;</p><img src='x.png'></body></html>",
+  "received_at": "2026-10-14T10:00:00",
+  "expected": {
+    "escalate": true
+  }
+}

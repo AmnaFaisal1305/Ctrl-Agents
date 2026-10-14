@@ -4,6 +4,12 @@ from pathlib import Path
 
 _CLAUSE = re.compile(r"^- ([A-Z]+-\d+): (.+)$")
 _WORD = re.compile(r"[a-z0-9]+")
+_STOP = {"the", "and", "for", "can", "how", "what", "when", "does", "with", "that", "this", "are", "you", "not", "any", "from", "have"}
+
+
+def _tokens(text: str) -> set[str]:
+    """Lowercase words minus stopwords, with a trailing plural 's' removed (installments ~ installment)."""
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in _WORD.findall(text.lower()) if w not in _STOP}
 
 
 @dataclass(frozen=True)
@@ -44,8 +50,11 @@ class Policy:
             return [self.by_code[c] for c in codes if c in self.by_code]
         if section:
             return self.section(section)
-        words = set(_WORD.findall(query.lower()))
-        scored = [(len(words & set(_WORD.findall(c.text.lower()))), c) for c in self.clauses]
+        words = _tokens(query)
+        clause_words = [(c, _tokens(c.text)) for c in self.clauses]
+        # rare words count more: a word found in few clauses (installments) beats one found everywhere (fee)
+        df = {w: sum(w in cw for _, cw in clause_words) for w in words}
+        scored = [(sum(1 / df[w] for w in words & cw), c) for c, cw in clause_words]
         hits = [c for score, c in sorted(scored, key=lambda t: -t[0]) if score > 0][:3]
         if hits:
             return hits

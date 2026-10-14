@@ -42,7 +42,7 @@ def test_loader_truncates_long_body(tmp_path: Path):
     f = tmp_path / "long.json"
     f.write_text(json.dumps({"id": "L", "body": "a" * 5000}), encoding="utf-8")
     email = load_email(f)
-    assert len(email.body) == 4000 and any("truncated" in w for w in email.load_warnings)
+    assert len(email.body) == 4000 and any("shortened" in w for w in email.load_warnings)
 
 
 def test_policy_parses_all_clauses():
@@ -66,3 +66,9 @@ def test_writer_sorts_and_writes_valid_json(tmp_path: Path):
 
 def test_sample_inbox_loads_twenty():
     assert len(load_inbox(ROOT / "data" / "inbox")) == 20
+
+
+def test_query_lookup_prefers_rare_words():
+    policy = Policy.parse(ROOT / "data" / "policy.md")
+    codes = [c.code for c in policy.lookup(query="fee installments and application deadlines")]
+    assert "FEE-3" in codes
