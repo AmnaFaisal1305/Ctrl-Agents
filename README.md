@@ -1,4 +1,4 @@
-# Student Helpdesk Triage Agent
+# Student Helpdesk Triage Agent.
 
 Reads student emails from `data/inbox/*.json`, looks up `data/policy.md`, decides category, priority and escalation, drafts a policy-grounded reply and writes `outbox.json` with a step log in `logs/`. Nothing is ever sent.
 
