@@ -1,7 +1,6 @@
 # Helpdesk Triage Console (frontend)
 
-React + Vite + TypeScript console over the Student Helpdesk Triage Agent. See `Design.md` for the
-full product brief. The UI reads the agent's decisions and streams the step timeline live; **nothing
+React + Vite + TypeScript console over the Student Helpdesk Triage Agent. The UI reads the agent's decisions and streams the step timeline live; **nothing
 is ever sent** — the only outward action is Copy-to-clipboard.
 
 ## Run

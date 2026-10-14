@@ -19,6 +19,19 @@ python agent.py             # every *.json in data/inbox -> outbox.json
 
 Drop a new `.json` email into `data/inbox/` and run again; no code change is needed.
 
+Optional environment variables (see `.env.example`): `LLM_MODEL` (default `gemini-2.5-flash`), `WORKERS`, `REFLECT=0` to switch off the shadow reviewer, `GMAIL_QUERY`.
+
+## Web console (React + FastAPI)
+
+A local console over the same agent: dashboard of decisions, live step timeline, submit-an-email form, Observability and Quality pages. Nothing is ever sent; the only outward action is Copy.
+
+```
+uvicorn backend.main:app --port 8000      # terminal 1, from the repo root
+cd frontend && npm install && npm run dev # terminal 2, opens http://localhost:5173
+```
+
+No password is needed locally. `VITE_USE_MOCK=1` (see `frontend/README.md`) runs the UI on bundled sample data with no backend.
+
 ## Gmail (optional, for the Gmail-based evaluation)
 
 Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is ever sent.
@@ -47,7 +60,7 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 uvicorn backend.main:app --port 8000      # run from the repo root; docs at http://localhost:8000/docs
 ```
 
-`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, `GET /api/metrics`, `GET /api/harness`, `GET /api/evals`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The web backend keeps its state in SQLite (`DB_PATH`, default `.data/helpdesk.db`), seeded from `data/inbox/E*.json` and `samples/` when empty; `python agent.py` stays file-based. The frontend brief and full API table are in `frontend/Design.md`.
+`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, `GET /api/metrics`, `GET /api/harness`, `GET /api/evals`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The web backend keeps its state in SQLite (`DB_PATH`, default `.data/helpdesk.db`), seeded from `data/inbox/E*.json` and `samples/` when empty; `python agent.py` stays file-based. `GET /api/events` sends `step` events (one per agent step, same shape as the `steps` array of an email) and `run` events (progress).
 
 ## Deploy (Vercel frontend + Render backend)
 
@@ -74,7 +87,7 @@ python agent.py --only-new               # reuse rows for unchanged emails
 
 ## Status
 
-All 20 sample emails produce valid rows (about 40 LLM calls, about a minute). Sample output is in `samples/`. See `HANDOFF.md` for what remains (Gmail verification, optional dashboard).
+All 20 sample emails produce valid rows: with the shadow reviewer on a full run is 60 LLM calls and about 2 minutes; with `REFLECT=0` about 40 calls and 1 minute. Sample output and step logs are in `samples/`. The unit tests (LLM and Gmail mocked) pass; the adversarial tuning suite passes 12 of 12. The design, schemas and decisions are in `ARCHITECTURE.md`.
 
 ## Building the submission zip
 

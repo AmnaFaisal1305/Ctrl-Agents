@@ -2,7 +2,7 @@
 
 ## 0. About this file
 
-This is the **design source of truth**: requirements, architecture, schemas, phases and tests. Working rules live in `CLAUDE.md`; session state lives in `HANDOFF.md`.
+This is the **design source of truth**: requirements, architecture, schemas, phases and tests. Run instructions are in `README.md`.
 
 **Keep this file in sync with the code.** At the end of every session, update any section that changed (modules, schemas, loop behaviour, validators, decisions) and add a line to the change log at the bottom.
 
@@ -123,8 +123,8 @@ bad file / LLM failure / step budget ─▶ fallback record ─▶ finalize
 | `evals/` | `cases/` (12 tuning), `heldout/` (8), `run_evals.py` (`--outbox`, default, `--heldout`). |
 | `app/reflect.py` | Shadow-mode critic (section 5.6). Logged only; never edits a row. |
 | `backend/metrics.py` | Aggregates step logs into the Observability numbers (section 5.6). |
-| `backend/` | FastAPI app for the React frontend (`main.py` routes, `service.py` logic, `store.py` SQLite store seeded from the samples, `auth.py` demo login). Imports `app/` and `agent.py`; the CLI is unchanged. Endpoints and SSE contract: `frontend/Design.md` section 7. No send endpoint exists. |
-| `frontend/` | React (Vite, TypeScript) UI, built by the teammate from `frontend/Design.md`. It is the only dashboard (Streamlit was dropped). Local demo only: `uvicorn` plus `npm run dev`; `vercel.json` is unused. Optional demo login: with `DEMO_PASSWORD` set the UI shows a login screen, `POST /api/login` returns a signed token sent as `X-Auth` (`?auth=` for SSE); Gmail fetch also needs `X-Admin-Key` (`ADMIN_KEY`). Off when unset. |
+| `backend/` | FastAPI app for the React frontend (`main.py` routes, `service.py` logic, `store.py` SQLite store seeded from the samples, `auth.py` demo login). Imports `app/` and `agent.py`; the CLI is unchanged. Endpoints and the SSE contract are listed in `README.md`. No send endpoint exists. |
+| `frontend/` | React (Vite, TypeScript) UI, built by the teammate. It is the only dashboard (Streamlit was dropped). Local demo only: `uvicorn` plus `npm run dev`; `vercel.json` is unused. Optional demo login: with `DEMO_PASSWORD` set the UI shows a login screen, `POST /api/login` returns a signed token sent as `X-Auth` (`?auth=` for SSE); Gmail fetch also needs `X-Admin-Key` (`ADMIN_KEY`). Off when unset. |
 
 ### 5.1 Schemas (`app/models.py`)
 

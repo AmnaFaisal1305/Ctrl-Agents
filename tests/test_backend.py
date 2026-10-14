@@ -153,8 +153,11 @@ def test_gmail_requires_token_then_fetches_and_drafts_only_on_request(tmp_path, 
     assert drafts == [["g1"]]
 
 
-def test_routes_validate_input_and_map_errors(tmp_path):
+def test_routes_validate_input_and_map_errors(tmp_path, monkeypatch):
     from fastapi import HTTPException
+
+    for name in ("ADMIN_KEY", "DEMO_PASSWORD"):  # set empty so a local .env cannot turn the gates on (load_dotenv never overrides)
+        monkeypatch.setenv(name, "")
 
     from backend import main
 

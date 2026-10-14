@@ -17,8 +17,13 @@ secrets/*
 data/inbox/*.json
 !data/inbox/E*.json
 
+# local-only: planning notes, demo script, rulebook, session handoff (kept on disk, not published)
+docs/
+CLAUDE.md
+HANDOFF.md
+frontend/Design.md
+
 # stray copies of OAuth client files
-docs/credentials*
 *client_secret*.json
 # dev tooling and editor files, not part of the submission
 .agents/
