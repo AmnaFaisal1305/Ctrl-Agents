@@ -1,0 +1,190 @@
+"""Backend logic over the agent. No HTTP in this file; routes live in main.py.
+
+Reuses the CLI code (agent.process, app.*), so the API and `python agent.py` behave the same.
+"""
+import json
+import re
+import secrets
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from pathlib import Path
+
+import agent
+from app.config import Settings
+from app.llm import make_llm
+from app.loader import load_email, load_inbox
+from app.models import EmailIn, OutboxRecord
+from app.policy import Policy
+from app.writer import write_outbox
+
+_SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+
+
+class NotFound(Exception):
+    pass
+
+
+class Service:
+    def __init__(self, settings: Settings, model=None) -> None:
+        self.s = settings
+        self.policy = Policy.parse(settings.policy)
+        self.model = model if model is not None else self._make_model()
+        self._pool = ThreadPoolExecutor(max_workers=1)  # one run at a time; the next waits its turn
+        self._lock = threading.Lock()
+        self._state = {"running": False, "total": 0, "done": 0, "llm_calls": 0, "queued": 0, "pending_ids": []}
+
+    def _make_model(self):
+        try:
+            return make_llm(self.s)
+        except Exception:  # e.g. missing key: runs still write fallback rows, like the CLI
+            return None
+
+    # ---- reads -------------------------------------------------------------------------------
+    def _records(self) -> dict[str, dict]:
+        try:
+            return {r["email_id"]: r for r in json.loads(self.s.outbox.read_text(encoding="utf-8"))}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
+
+    def _path(self, email_id: str) -> Path:
+        if not _SAFE_ID.match(email_id):
+            raise NotFound(email_id)
+        path = self.s.inbox / f"{email_id}.json"
+        if not path.exists():
+            raise NotFound(email_id)
+        return path
+
+    def state(self) -> dict:
+        with self._lock:
+            return dict(self._state, pending_ids=list(self._state["pending_ids"]))
+
+    def health(self) -> dict:
+        return {"status": "ok", "model": self.s.model, "llm_ready": self.model is not None}
+
+    def _summary(self, email: EmailIn, records: dict[str, dict], pending: set[str]) -> dict:
+        record = records.get(email.id)
+        status = "processing" if email.id in pending else ("done" if record else "pending")
+        return {"id": email.id, "from_name": email.from_name, "from_email": email.from_email, "subject": email.subject,
+                "received_at": email.received_at, "status": status, "record": record}
+
+    def list_emails(self) -> list[dict]:
+        records, pending = self._records(), set(self.state()["pending_ids"])
+        return [self._summary(e, records, pending) for e in load_inbox(self.s.inbox)]
+
+    def detail(self, email_id: str) -> dict:
+        email = load_email(self._path(email_id))
+        out = self._summary(email, self._records(), set(self.state()["pending_ids"]))
+        return {**out, "body": email.body, "load_warnings": email.load_warnings, "steps": self.steps(email_id)}
+
+    def steps(self, email_id: str) -> list[dict]:
+        path = self.s.logs / f"{email_id}.jsonl"
+        if not _SAFE_ID.match(email_id) or not path.exists():
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                rows.append(json.loads(line))
+            except ValueError:
+                continue
+        return rows
+
+    def stats(self) -> dict:
+        rows = list(self._records().values())
+        count = lambda key: {k: sum(1 for r in rows if r[key] == k) for k in sorted({r[key] for r in rows})}  # noqa: E731
+        return {"total": len(rows), "emails_in_inbox": len(list(self.s.inbox.glob("*.json"))),
+                "escalated": sum(1 for r in rows if r["escalate"]),
+                "needs_human_fallback": sum(1 for r in rows if r["confidence"] == 0.0),
+                "avg_confidence": round(sum(r["confidence"] for r in rows) / len(rows), 2) if rows else 0.0,
+                "by_category": count("category"), "by_priority": count("priority")}
+
+    def policy_view(self) -> list[dict]:
+        return [{"section": name, "clauses": [{"code": c.code, "text": c.text} for c in self.policy.section(name)]}
+                for name in self.policy.sections()]
+
+    # ---- writes ------------------------------------------------------------------------------
+    def create_email(self, from_name: str, from_email: str, subject: str, body: str) -> str:
+        """Save a new email into the inbox folder (the agent reads that folder). Never sends anything."""
+        email_id = f"web-{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
+        data = {"id": email_id, "from_name": from_name.strip(), "from_email": from_email.strip(),
+                "subject": subject.strip(), "body": body.strip(), "received_at": datetime.now().isoformat(timespec="seconds")}
+        self.s.inbox.mkdir(parents=True, exist_ok=True)
+        (self.s.inbox / f"{email_id}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return email_id
+
+    def start_run(self, ids: list[str] | None = None, only_new: bool = False) -> dict:
+        """Queue a run over `ids` (None = every file in the inbox). Returns the run state immediately."""
+        with self._lock:
+            self._state["queued"] += 1
+        self._pool.submit(self._run, ids, only_new)
+        return self.state()
+
+    def _run(self, ids: list[str] | None, only_new: bool) -> None:
+        try:
+            emails = [e for e in load_inbox(self.s.inbox) if ids is None or e.id in ids]
+            reused = agent.reusable_rows(emails, self.s.outbox, self.s.logs) if only_new else {}
+            todo = [e for e in emails if e.id not in reused]
+            with self._lock:
+                self._state.update(running=True, total=len(todo), done=0, llm_calls=0, pending_ids=[e.id for e in todo])
+                self._state["queued"] -= 1
+            with ThreadPoolExecutor(max_workers=self.s.workers) as pool:
+                futures = [pool.submit(agent.process, e, self.model, self.policy, self.s.logs) for e in todo]
+                for future in as_completed(futures):
+                    record, calls = future.result()
+                    self._save(record, next(e for e in todo if e.id == record.email_id))
+                    with self._lock:
+                        self._state["done"] += 1
+                        self._state["llm_calls"] += calls
+                        self._state["pending_ids"].remove(record.email_id)
+        finally:
+            with self._lock:
+                self._state.update(running=False, pending_ids=[])
+
+    def _save(self, record: OutboxRecord, email: EmailIn) -> None:
+        """Merge one finished row into outbox.json (so the UI sees it at once) and remember the email hash."""
+        rows = {k: OutboxRecord(**v) for k, v in self._records().items()}
+        rows[record.email_id] = record
+        write_outbox(list(rows.values()), self.s.outbox)
+        seen_file = self.s.logs / "seen.json"
+        try:
+            seen = json.loads(seen_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            seen = {}
+        seen[email.id] = agent.email_hash(email)
+        self.s.logs.mkdir(parents=True, exist_ok=True)
+        seen_file.write_text(json.dumps(seen), encoding="utf-8")
+
+    def wait_idle(self, timeout: float = 60.0) -> None:
+        """For tests and scripts: block until queued runs finish."""
+        self._pool.submit(lambda: None).result(timeout)
+
+
+class LogTail:
+    """Yields new step rows from logs/*.jsonl since the last poll. Powers the SSE stream."""
+
+    def __init__(self, logs: Path) -> None:
+        self.logs = logs
+        self.offsets = {p: p.stat().st_size for p in logs.glob("*.jsonl")}
+
+    def poll(self) -> list[dict]:
+        out = []
+        for path in sorted(self.logs.glob("*.jsonl")):
+            try:
+                size, offset = path.stat().st_size, self.offsets.get(path, 0)
+                if size < offset:  # the file was restarted by a new run
+                    offset = 0
+                if size == offset:
+                    continue
+                with path.open("rb") as f:
+                    f.seek(offset)
+                    chunk = f.read()
+            except OSError:
+                continue
+            complete = chunk[: chunk.rfind(b"\n") + 1]
+            self.offsets[path] = offset + len(complete)
+            for line in complete.decode("utf-8", errors="replace").splitlines():
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+        return out

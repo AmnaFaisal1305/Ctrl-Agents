@@ -41,6 +41,14 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 
 **Limitations.** Keyword policy lookup (no embeddings); replies are not language-checked by code; the safety net can over-escalate on a trigger word; bodies over 4,000 characters keep head and tail only; `find_related_emails` (earlier emails from the same sender) is not implemented, so overdue complaints rely on what the email itself says.
 
+## API backend (for the React frontend)
+
+```
+uvicorn backend.main:app --port 8000      # run from the repo root; docs at http://localhost:8000/docs
+```
+
+`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `POST /api/process`, `GET /api/stats`, `GET /api/policy`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
+
 ## Tests and evals
 
 ```

@@ -105,6 +105,7 @@ def build_graph(model, policy: Policy, logs: Path):
 
 def run_email(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[OutboxRecord, int]:
     """Run the graph for one email. Returns (record, llm_calls). Never raises."""
+    (logs / f"{email.id}.jsonl").unlink(missing_ok=True)  # one log per run, so the timeline is never mixed with old runs
     if not (email.body.strip() or email.subject.strip()):
         reason = "; ".join(email.load_warnings) or "no usable text"
         log_step(logs, email.id, 0, "rule", "fallback", reason)

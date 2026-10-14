@@ -90,6 +90,7 @@ python agent.py --only-new           # P1: reuse rows for unchanged files
 pytest                               # unit tests (LLM mocked)
 python evals/run_evals.py            # property checks and adversarial cases
 streamlit run dashboard/streamlit_app.py   # P2 dashboard
+uvicorn backend.main:app --port 8000 # FastAPI backend for the React frontend (frontend/Design.md has the API)
 ```
 
 ## Definition of done

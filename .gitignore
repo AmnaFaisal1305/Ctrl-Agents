@@ -31,3 +31,8 @@ skills-lock.json
 .DS_Store
 Thumbs.db
 submission*.zip
+
+# frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local

@@ -2,6 +2,22 @@
 
 Updated at the end of every session. Newest session at the top. Keep it short and factual.
 
+## Session 2b (FastAPI backend + frontend brief)
+
+**Date:** 2026-10-14. Decisions (asked, user chose the recommended options): API scope = dashboard + submit + run; in-process import of `app/` (stays at repo root, CLI unchanged); `fastapi` and `uvicorn` added and pinned; live updates via SSE.
+
+### Done
+- `backend/main.py` (routes, CORS for localhost:5173) and `backend/service.py` (list/detail/stats/policy, create email file, one-at-a-time run queue reusing `agent.process`, `LogTail` for SSE). `tests/test_backend.py` (10 tests, fake model, no HTTP client dependency).
+- `frontend/Design.md` (screens, visual language, states, data shapes, API table, safety rules) for the teammate; `frontend/` otherwise empty.
+- `run_email` clears the email's old log at start (each log is one run, so the timeline is clean).
+- Verified live: server started, `/api/health`, `/api/stats`, `/api/emails` OK; `POST /api/emails` processed a new hazard email (escalated, 2 LLM calls) and the SSE stream showed `run` start, 4 `step` events, `run` done; unsafe ids (`../secrets`) and unknown ids give 404, empty POST gives 422. Test email and its row were removed afterwards.
+- `pytest`: 36 passed.
+
+### Not done / notes
+- Gmail trigger endpoint not built (Gmail still unverified; OAuth browser flow does not suit a server thread). No auth: local demo only, bind to localhost.
+- `POST /api/emails` writes `data/inbox/web-*.json` (gitignored); these rows also appear in `outbox.json` and a later `python agent.py` will process them too.
+- Frontend not started (teammate). Backend run command: `uvicorn backend.main:app --port 8000` from the repo root.
+
 ## Session 2 (P0.2 + P0.3 + P1: agent finalized)
 
 **Date:** 2026-10-14
