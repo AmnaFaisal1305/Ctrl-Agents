@@ -1,6 +1,9 @@
 .env
+.env.*
+!.env.example
 .cache/
 __pycache__/
+*.pyc
 .venv/
 logs/
 outbox.json
@@ -16,3 +19,15 @@ data/inbox/*.json
 # stray copies of OAuth client files
 docs/credentials*
 *client_secret*.json
+# dev tooling and editor files, not part of the submission
+.agents/
+.claude/
+skills-lock.json
+.vscode/
+.idea/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.DS_Store
+Thumbs.db
+submission*.zip

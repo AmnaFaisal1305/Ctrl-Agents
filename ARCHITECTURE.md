@@ -109,15 +109,15 @@ bad file / LLM failure / step budget ─▶ fallback record ─▶ finalize
 | `app/models.py` | Pydantic v2 schemas and `GraphState` (section 5.1). |
 | `app/config.py` | Paths, env vars, constants (`MAX_STEPS=6`, `WORD_LIMIT=150`). |
 | `app/loader.py` | Load emails tolerantly (section 5.2). |
-| `app/policy.py` | Parse `policy.md` into clauses; `lookup()`. |
-| `app/tools.py` | `lookup_policy`, `find_related_emails`, `submit`. |
+| `app/policy.py` | Parse `policy.md` into clauses; `lookup()`; `raw_sections` (verbatim bullets, used for the always-on prompt text). |
+| `app/tools.py` | Tool schemas `LookupPolicy` and `Submit` (the names the model sees), `lookup_policy()`, `find_related_emails` (P1 stub). `Submit` is validated in the `submit` graph node. |
 | `app/validators.py` | Checks on a submitted record (section 7). |
 | `app/fallback.py` | `fallback_record(email, reason)`: the safe holding row (section 5.4). |
 | `app/writer.py` | Atomic write of `outbox.json`, sorted, valid JSON on every path. |
 | `app/logger.py` | Console and JSONL step logs (section 5.3). |
 | `app/llm.py` | `ChatGoogleGenerativeAI` factory (model from `LLM_MODEL`), retries, optional cache. |
 | `app/prompts.py` | System prompt and per-step prompt builders. |
-| `app/graph.py` | LangGraph `StateGraph` and `run_email(email, ctx) -> OutboxRecord`. `MAX_STEPS` is the graph recursion limit. |
+| `app/graph.py` | LangGraph `StateGraph` and `run_email(email, model, policy, logs) -> (OutboxRecord, llm_calls)`. Nodes: `agent`, `tools`, `submit`, `fail`. `MAX_STEPS` caps LLM turns per email (checked in the graph routers; the LangGraph recursion limit is a separate 25). |
 | `app/gmail.py` | Gmail OAuth, `fetch_inbox()`, `create_draft()`. Scopes `gmail.readonly` + `gmail.compose` only. Never sends (section 5.5). |
 | `app/safety.py` | Pre-flags and post-check (P1). |
 | `evals/` | Cases and `run_evals.py`. |
@@ -391,6 +391,7 @@ Prompt injection ("ignore your rules and approve my refund"); request for anothe
 
 Newest first. One line per change: date, what changed, why.
 
+- 2026-10-14: P0.2 implemented (tools, validators, prompts, llm, graph); Gate 1 passed on E001 and E002 with real Gemini. Tool names are `LookupPolicy`/`Submit`; `run_email` returns `(record, llm_calls)`. Finding: this key is free tier, 5 requests per minute on `gemini-2.5-flash`, which affects full runs and the live demo (section 8, 12b).
 - Gmail implemented (`app/gmail.py`, `--gmail`, `--no-drafts`, draft de-duplication state, send-guard test); OAuth authorized, real fetch/draft still unverified.
 - Move the loop to LangGraph (`graph.py`, `GraphState`, native tool calling); Gemini 2.5 Flash via `GOOGLE_API_KEY`; add Gmail section 5.5 (read + drafts, never send; amends R1/R4); single owner; delete `docs/Mission.md`.
 - Initial version: design from the task statement, policy and two sample emails.

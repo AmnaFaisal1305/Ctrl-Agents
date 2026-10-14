@@ -8,21 +8,24 @@ from pathlib import Path
 
 from app.config import Settings, load_settings
 from app.fallback import fallback_record
+from app.graph import run_email
+from app.llm import make_llm
 from app.loader import load_inbox
 from app.logger import log_step
 from app.models import EmailIn, OutboxRecord
+from app.policy import Policy
 from app.writer import write_outbox
 
 
-def process(email: EmailIn, logs: Path) -> OutboxRecord:
-    """Stub agent (P0.1): no LLM yet, so every email gets the safe fallback row."""
+def process(email: EmailIn, model, policy: Policy, logs: Path) -> tuple[OutboxRecord, int]:
+    """Run the LangGraph agent for one email. Returns (record, llm_calls); never raises."""
     try:
-        reason = "; ".join(email.load_warnings) if not (email.body or email.subject) else "agent not implemented yet"
-        record = fallback_record(email, reason)
-        log_step(logs, email.id, 1, "rule", "fallback", reason)
-        return record
+        if model is None:
+            log_step(logs, email.id, 0, "rule", "fallback", "LLM unavailable")
+            return fallback_record(email, "LLM unavailable"), 0
+        return run_email(email, model, policy, logs)
     except Exception as exc:  # fail soft: every email gets a row
-        return fallback_record(email, f"unexpected error: {type(exc).__name__}")
+        return fallback_record(email, f"unexpected error: {type(exc).__name__}"), 0
 
 
 def save_drafts(service, records: list[OutboxRecord], gmail_ids: set[str], logs: Path) -> None:
@@ -66,12 +69,19 @@ def main() -> int:
 
     service, gmail_ids = gmail_fetch(settings) if args.gmail else (None, set())
     emails = load_inbox(settings.inbox)
+    policy = Policy.parse(settings.policy)
+    try:
+        model = make_llm(settings)
+    except Exception as exc:  # e.g. missing GOOGLE_API_KEY: every email still gets a fallback row
+        print(f"LLM unavailable ({type(exc).__name__}); writing fallback rows", flush=True)
+        model = None
     with ThreadPoolExecutor(max_workers=settings.workers) as pool:
-        records = list(pool.map(lambda e: process(e, settings.logs), emails))
+        results = list(pool.map(lambda e: process(e, model, policy, settings.logs), emails))
+    records = [r for r, _ in results]
     write_outbox(records, settings.outbox)
     if service and not args.no_drafts:
         save_drafts(service, records, gmail_ids, settings.logs)
-    print(f"Processed {len(records)} emails -> {settings.outbox}. LLM calls: 0")
+    print(f"Processed {len(records)} emails -> {settings.outbox}. LLM calls: {sum(n for _, n in results)}")
     return 0
 
 

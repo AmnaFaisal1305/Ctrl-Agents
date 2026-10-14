@@ -35,4 +35,12 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 
 ## Status
 
-Scaffold plus Gmail plumbing: the loader, policy parser, writer, logger and Gmail fetch/draft code work; the LLM agent graph is not implemented yet, so every email currently receives the safe fallback row.
+The LangGraph agent works end to end on the sample emails (Gate 1: E001 and E002 verified with real Gemini). Full 20-email run, prompt tuning, safety net and evals are still in progress; see `HANDOFF.md`.
+
+## Building the submission zip
+
+Zip only tracked files so secrets, `.env`, `.venv/`, `logs/` and caches are left out automatically:
+
+```
+git archive -o AgentSprint_<TeamName>.zip HEAD
+```
