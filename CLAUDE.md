@@ -84,6 +84,7 @@ Do not use any other connector (design, deployment, CRM, automation or database 
 ```
 python agent.py                      # process data/inbox -> outbox.json
 python agent.py --gmail              # fetch Gmail label into data/inbox, process, save drafts (never send)
+python agent.py --gmail --no-drafts  # same, without creating drafts
 python agent.py --watch              # P2: process new files as they appear
 python agent.py --only-new           # P1: reuse rows for unchanged files
 pytest                               # unit tests (LLM mocked)
