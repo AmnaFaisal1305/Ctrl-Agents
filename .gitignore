@@ -1,0 +1,10 @@
+.env
+.cache/
+__pycache__/
+.venv/
+logs/
+outbox.json
+secrets/*
+!secrets/.gitkeep
+*.tmp
+.pytest_cache/

@@ -1,0 +1,6 @@
+langgraph==1.2.15
+langchain-core==1.6.10
+langchain-google-genai==4.4.2
+pydantic==2.14.1
+python-dotenv==1.2.4
+pytest==9.1.1
