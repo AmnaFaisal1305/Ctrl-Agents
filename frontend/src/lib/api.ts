@@ -2,7 +2,7 @@
 // from lib/mock.ts instead of the network, so the UI runs with no backend (Design.md section 8).
 import { ApiError, mock } from "./mock";
 import type {
-  CreateEmailBody, EmailDetail, EmailRow, Health, PolicySection, RunState, Stats,
+  CreateEmailBody, EmailDetail, EmailRow, EvalsResponse, Harness, Health, Metrics, PolicySection, RunState, Stats,
 } from "./types";
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === "1";
@@ -43,6 +43,9 @@ export const api = {
   getEmail: (id: string): Promise<EmailDetail> =>
     USE_MOCK ? mock.getEmail(id) : json(`/api/emails/${encodeURIComponent(id)}`),
   getPolicy: (): Promise<PolicySection[]> => (USE_MOCK ? mock.getPolicy() : json("/api/policy")),
+  getMetrics: (): Promise<Metrics> => (USE_MOCK ? mock.getMetrics() : json("/api/metrics")),
+  getHarness: (): Promise<Harness> => (USE_MOCK ? mock.getHarness() : json("/api/harness")),
+  getEvals: (): Promise<EvalsResponse> => (USE_MOCK ? mock.getEvals() : json("/api/evals")),
   getRun: (): Promise<RunState> => (USE_MOCK ? mock.getRun() : json("/api/run")),
 
   createEmail: (body: CreateEmailBody): Promise<{ id: string; processing: boolean; run: RunState }> =>

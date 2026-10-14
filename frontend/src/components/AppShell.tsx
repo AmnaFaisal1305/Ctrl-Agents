@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
-import { Inbox, PenSquare } from "lucide-react";
+import { Activity, Inbox, PenSquare, ShieldCheck } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { USE_MOCK, api } from "@/lib/api";
 import { useAsync } from "@/lib/useAsync";
@@ -45,6 +45,14 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/submit" className={navClass}>
               <PenSquare className="h-4 w-4" aria-hidden />
               Submit
+            </NavLink>
+            <NavLink to="/observability" className={navClass}>
+              <Activity className="h-4 w-4" aria-hidden />
+              <span className="hidden sm:inline">Observability</span>
+            </NavLink>
+            <NavLink to="/quality" className={navClass}>
+              <ShieldCheck className="h-4 w-4" aria-hidden />
+              <span className="hidden sm:inline">Quality</span>
             </NavLink>
           </nav>
           <div className="ml-auto">

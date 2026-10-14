@@ -3,7 +3,7 @@
 // This fakes the *transport*, never the agent's decisions: a mock-submitted email gets a
 // neutral "needs review" structure, not an invented escalation.
 import type {
-  CreateEmailBody, EmailDetail, EmailRow, Health, PolicySection, Record, RunState, Stats, Step,
+  CreateEmailBody, EmailDetail, EmailRow, EvalsResponse, Harness, Health, Metrics, PolicySection, Record, RunState, Stats, Step,
 } from "./types";
 
 import outbox from "../../../samples/outbox.json";
@@ -103,6 +103,23 @@ export const mock = {
   },
   async getRun(): Promise<RunState> {
     return run;
+  },
+  // Observability and evals need the real logs; mock mode shows the empty states.
+  async getMetrics(): Promise<Metrics> {
+    return {
+      emails: 0, llm_calls: 0, input_tokens: 0, output_tokens: 0, latency_ms: { p50: 0, p95: 0, critic_p50: 0 },
+      tool_usage: {}, outcomes: {}, recovery: { rejections_by_code: {}, self_healed: 0, fallbacks: 0, safety_net: 0 },
+      critic: { verdicts: {}, aspects: {} }, context: { avg_tokens: 0, hinted_emails: 0, truncated_emails: 0 }, per_email: [],
+    };
+  },
+  async getHarness(): Promise<Harness> {
+    return {
+      model: "mock", temperature: 0, timeout_s: 30, sdk_retries: 3, workers: 2, max_model_turns: 6, max_revisions: 2,
+      word_limit: 150, body_limit_chars: 4000, reflection: false, guards: [],
+    };
+  },
+  async getEvals(): Promise<EvalsResponse> {
+    return { saved: { cases: null, heldout: null }, live: { checked: 0, failed: 0, rows: [] } };
   },
   async getHealth(): Promise<Health> {
     return { status: "mock", model: "mock (no LLM)", llm_ready: false };

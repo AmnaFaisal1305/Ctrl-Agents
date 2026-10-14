@@ -2,7 +2,7 @@
 
 Session state. **Section A is the single up-to-date picture; read it first.** Section B is the short history, newest first. Update both at the end of every session.
 
-Last updated: 2026-10-14, end of session 3. Uncommitted: session 3 changes (API key, docs drift, this file). Local `main` is ahead of `origin/main` and nothing is pushed.
+Last updated: 2026-10-14, end of session 3. Session 3 part 2 (observability, reflection, Quality page) may be uncommitted: check `git status`. Local `main` is ahead of `origin/main` and nothing is pushed.
 
 ---
 
@@ -15,7 +15,8 @@ Last updated: 2026-10-14, end of session 3. Uncommitted: session 3 changes (API 
 | Backend (`backend/`) | **Done.** FastAPI, SSE, in-process agent. | Live server run with real Gemini: add, process, reprocess, delete, outbox, stats, SSE, error codes all OK. |
 | Gmail | **Code done, unverified with real mail.** Read-only fetch ran against the real token and found 0 messages. | Label `helpdesk` is empty. Drafts never created for real. |
 | Frontend (`frontend/`) | **Built by the teammate (commit `7853806`), integrated.** React + Vite + TypeScript + Tailwind, mock mode via `VITE_USE_MOCK=1`. Local demo only (`vercel.json` unused). | `npm install` + `npm run build` pass. Against the live backend with `API_KEY` set: 401 without key, 200 with key (also SSE via `?api_key=`), CORS preflight OK; one real email via the API ran (2 LLM calls, 4 steps, status done), then deleted. Browser test with `agent-browser` (session `fe-test`): dashboard (20 rows, 9 escalated, filter), email detail (reply, copy, step timeline), Submit with the prompt-injection example (redirected to detail, live timeline, ESC-6), only-new Process all (0 LLM calls), backend-down error state with Retry. Reprocess button (E018, 1 LLM call, timeline not duplicated). Mobile 375px: header overflowed by 12px on every page; fixed in `AppShell.tsx` (brand text and model name hidden below `sm`), re-checked, no horizontal scroll. **Not tested:** the other Submit examples (Roman Urdu etc.). |
-| Tests | `pytest`: **44 passed** (LLM and Gmail mocked; new test covers the API key). | |
+| Observability and reflection | **Done, accuracy-neutral.** `meta` on log rows, step-0 `context` row, shadow critic (`app/reflect.py`, `REFLECT=0` disables), `/api/metrics`, `/api/harness`, `/api/evals`, UI pages Observability and Quality, Context and Reflection cards on the detail page. | Full run of the 20 with critic: 60 LLM calls, 0 fallbacks, `evals --outbox` 0 problems, critic agreed on 16 of 20 (4 concerns: 4 next_step, 1 over_promising). Tuning cases 12 of 12 (26 calls) saved to `logs/evals/results-cases.json`. Held-out **not re-run** (partly used). 2 submits were rejected by the new `NO_POLICY_CODE` check and self-healed. UI checked with `agent-browser` at 1280 px and 375 px. |
+| Tests | `pytest`: **49 passed** (LLM and Gmail mocked; new test covers the API key). | |
 | Submission | **Not prepared** (freeze checklist below). | |
 
 Hard rules status: one command `python agent.py` works; 9 output fields only; nothing sent (a test greps for send calls, none in `app/`, `agent.py`, `backend/`); email text treated as data; secrets and `.env` untracked.
@@ -25,7 +26,7 @@ Hard rules status: one command `python agent.py` works; 9 output fields only; no
 2. **Remaining UI checks (you and the teammate):** other Submit examples. The UI has **no Delete button** (backend supports `DELETE` for `web-*`; `Design.md` lists it); ask the teammate if intended. Original steps: `uvicorn backend.main:app --port 8000` and `cd frontend && npm run dev`; if `API_KEY` is set in the backend `.env`, set the same `VITE_API_KEY` in `frontend/.env`. Check dashboard, submit, live timeline, copy reply, reprocess, delete, empty and error states. Tell the teammate their `api.ts` and `sse.ts` were touched (API key).
 3. **Docs drift: done this session** (Streamlit and `dashboard/` removed from `CLAUDE.md`, `ARCHITECTURE.md`).
 4. **Freeze and submission** (Gmail verification, item 1, is deferred by decision) (`ARCHITECTURE.md` section 13):
-   - [ ] Final full run, then refresh `samples/outbox.json` and `samples/logs/` from it (they currently come from the run before the backend work; same agent code).
+   - [x] Final full run done and `samples/` refreshed (2026-10-14, 60 calls). Re-do only if the agent changes again. Original item: refresh `samples/outbox.json` and `samples/logs/` from it (they currently come from the run before the backend work; same agent code).
    - [ ] Remove any `data/inbox/web-*.json` test files and matching `outbox.json` rows so the delivered inbox is exactly the intended emails.
    - [ ] Delete `docs/credentials` (ignored by git, never read, would be included by a plain folder zip).
    - [x] ~~Fresh-clone test~~ **Skipped by decision (2026-10-14).** Risk: a missing file or dependency in `requirements.txt` or the README would only show on judging day.
@@ -72,7 +73,7 @@ Hard rules status: one command `python agent.py` works; 9 output fields only; no
 ## A6. How to run and verify
 ```
 .venv\Scripts\activate
-pytest -q                                   # 44 passed
+pytest -q                                   # 49 passed
 python agent.py                             # all emails -> outbox.json, prints LLM call count
 python agent.py --only-new                  # reuse rows for unchanged emails (0 calls)
 python evals/run_evals.py --outbox          # property checks on outbox.json, no LLM
@@ -94,6 +95,15 @@ Quota discipline: single emails while tuning; the full sets only at gates.
 ---
 
 # B. Session history (newest first)
+
+## Session 3, part 2 (2026-10-14): observability, reflection, context and evals in the UI
+- Plan: `C:/Users/ahmed/.claude/plans/tidy-spinning-stallman.md`. Decisions: local tracing only (no LangSmith/Langfuse, so no email text leaves the machine and no new dependency); features must not change accuracy.
+- Agent (logs only): `log_step(..., meta=)`; token counts from `usage_metadata`; step-0 `context` row (`prompts.context_meta`); `lookup_result` meta. `run_summary` row from the plan was **not** built: metrics derive outcome and totals from the rows.
+- Reflection: `app/reflect.py`, called after `post_check` in `run_email(..., critic=None)`; fixed own bug: the first critic version did not see the looked-up clauses and wrongly called FEE-3 invented, now it gets them. `agent.process`, `Service` take the critic; tests pass none.
+- Backend: `backend/metrics.py` (pure), `Service.metrics/harness/evals`, routes behind the API key. `evals/run_evals.py` now saves `logs/evals/results-<mode>.json`.
+- Frontend (teammate's files touched, additive): `Observability.tsx`, `Quality.tsx`, `ContextCard.tsx`, `ReflectionCard.tsx`, nav links, `StepItem` tokens and reflect icon, types, api, mock fixtures. Fixed two mobile overflows (header, detail grid).
+- Gate run vs the earlier outbox: 4 rows differ in priority or category (E002, E007 high to medium; E019 medium to high; E017 other to academic). Cause: known run-to-run variation, not the critic (it runs after the decision and its result is discarded; unit tests assert the record is identical with and without a critic). Replies re-read for those four: still policy-faithful.
+- Known limits: the SDK's own retries are not counted; `approx_tokens` is chars/4; Observability shows the latest run of each email only; the critic sometimes flags `next_step` on replies that point to an office.
 
 ## Session 3 (2026-10-14): frontend integrated, docs cleaned
 - Baseline: `pytest` 42 passed, `evals --outbox` 0 problems, `npm run build` OK. Backend routes match `frontend/src/lib/api.ts` (no mismatch found).

@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2, Search, ShieldCheck, Shield, XCircle, FileText, CircleDot } from "lucide-react";
+import { Bot, CheckCircle2, Search, ShieldCheck, Shield, XCircle, FileText, CircleDot, Eye } from "lucide-react";
 import type { Step } from "@/lib/types";
 import { cn } from "@/lib/cn";
 
@@ -12,6 +12,7 @@ function visuals(step: Step) {
     if (step.action === "validate") return { Icon: CheckCircle2, tint: "text-ok", ring: "border-ok/40 bg-ok-soft" };
     return { Icon: FileText, tint: "text-muted-foreground", ring: "border-border bg-muted" };
   }
+  if (step.action === "reflect") return { Icon: Eye, tint: "text-primary", ring: "border-primary/30 bg-card" };
   if (step.action === "LookupPolicy") return { Icon: Search, tint: "text-primary", ring: "border-primary/30 bg-card" };
   if (step.action === "Submit") return { Icon: CircleDot, tint: "text-primary", ring: "border-primary/30 bg-card" };
   return { Icon: Bot, tint: "text-primary", ring: "border-primary/30 bg-card" };
@@ -35,6 +36,9 @@ export function StepItem({ step, last }: { step: Step; last: boolean }) {
           </span>
           <span className="font-medium">{step.action}</span>
           {args && <span className="font-mono text-xs text-muted-foreground">{args}</span>}
+          {typeof step.meta?.input_tokens === "number" && (
+            <span className="nums text-xs text-muted-foreground">{step.meta.input_tokens} in / {Number(step.meta.output_tokens ?? 0)} out tokens</span>
+          )}
           {step.latency_ms > 0 && <span className="nums ml-auto text-xs text-muted-foreground">{step.latency_ms} ms</span>}
         </div>
         <p className={cn("mt-0.5 whitespace-pre-wrap break-words text-sm", rejected ? "text-warn" : "text-muted-foreground")}>

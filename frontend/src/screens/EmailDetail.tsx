@@ -16,6 +16,8 @@ import { ConfidenceMeter } from "@/components/ConfidenceMeter";
 import { PolicyRefChip } from "@/components/PolicyRefChip";
 import { ReplyDraft } from "@/components/ReplyDraft";
 import { StepTimeline } from "@/components/StepTimeline";
+import { ContextCard } from "@/components/ContextCard";
+import { ReflectionCard } from "@/components/ReflectionCard";
 import { ErrorState } from "@/components/ErrorState";
 
 export default function EmailDetail() {
@@ -130,6 +132,13 @@ export default function EmailDetail() {
           </CardContent>
         </Card>
       </div>
+
+      {(steps.some((s) => s.action === "context") || steps.some((s) => s.action.startsWith("reflect"))) && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="min-w-0"><CardContent className="pt-4"><ContextCard steps={steps} /></CardContent></Card>
+          <Card className="min-w-0"><CardContent className="pt-4"><ReflectionCard steps={steps} /></CardContent></Card>
+        </div>
+      )}
 
       {/* Timeline */}
       <Card>

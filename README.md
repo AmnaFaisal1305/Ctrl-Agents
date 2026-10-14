@@ -47,7 +47,11 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 uvicorn backend.main:app --port 8000      # run from the repo root; docs at http://localhost:8000/docs
 ```
 
-`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
+`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, `GET /api/metrics`, `GET /api/harness`, `GET /api/evals`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
+
+## Observability
+
+Every step is logged to `logs/<email_id>.jsonl` with latency, token counts and context sizes. The React console adds an **Observability** page (latency, tokens, validator rejections and self-healing, harness budgets and guards, critic verdicts), a **Quality** page (property checks on the current outbox, tuning and held-out suite results) and per-email **Context** and **Reflection** cards. A second model reviews each final reply in shadow mode (it never changes the row; `REFLECT=0` disables it). Everything is local: no data is sent to a tracing service.
 
 ## Tests and evals
 
