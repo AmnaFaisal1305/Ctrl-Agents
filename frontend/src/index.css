@@ -4,33 +4,52 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 222 24% 16%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 24% 16%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222 24% 16%;
-    --primary: 222 47% 31%;
-    --primary-foreground: 210 40% 98%;
-    --muted: 210 16% 93%;
-    --muted-foreground: 215 16% 42%;
-    --accent: 210 16% 93%;
-    --accent-foreground: 222 24% 16%;
-    --border: 214 20% 88%;
-    --input: 214 20% 88%;
-    --ring: 222 47% 41%;
-    --radius: 0.5rem;
+    /* ── New palette (hex, referenced via var() in tailwind tokens) ── */
+    --paper: #F3F2F9;
+    --surface: #FFFFFF;
+    --ink: #15122B;
+    --ink-2: #514E6B;
+    --ink-3: #8A87A3;
+    --line: #E4E2F0;
+    --line-2: #F0EFF7;
+    --brand: #5B4BFF;
+    --brand-ink: #4535E0;
+    --brand-tint: #ECEAFF;
+    --rail: #16123A;
+    --hi: #F0405F;
+    --hi-tint: #FFE9EE;
+    --md: #B87000;
+    --md-bar: #FFA62B;
+    --md-tint: #FFF1D6;
+    --lo: #0E9A66;
+    --lo-tint: #DDF6EA;
 
-    /* semantic: high = red, medium = amber, low/ok = calm green-grey */
-    --danger: 0 72% 46%;
+    /* ── shadcn/Tailwind HSL tokens (existing components use hsl(var(--xxx))) ── */
+    --background: 248 23% 96%;
+    --foreground: 248 42% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 248 42% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 248 42% 12%;
+    --primary: 248 100% 64%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 248 22% 95%;
+    --muted-foreground: 248 16% 36%;
+    --accent: 248 100% 95%;
+    --accent-foreground: 248 42% 12%;
+    --border: 248 22% 91%;
+    --input: 248 22% 91%;
+    --ring: 248 100% 64%;
+    --radius: 0.6rem;
+    --danger: 348 86% 60%;
     --danger-foreground: 0 0% 100%;
-    --danger-soft: 0 72% 96%;
-    --warn: 35 92% 45%;
-    --warn-foreground: 30 50% 12%;
-    --warn-soft: 40 90% 95%;
-    --ok: 160 25% 40%;
+    --danger-soft: 348 100% 95%;
+    --warn: 38 100% 36%;
+    --warn-foreground: 38 100% 14%;
+    --warn-soft: 38 100% 91%;
+    --ok: 157 83% 33%;
     --ok-foreground: 0 0% 100%;
-    --ok-soft: 160 25% 95%;
+    --ok-soft: 145 62% 92%;
   }
 
   * {
@@ -38,12 +57,16 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
     font-feature-settings: "cv11", "ss01";
   }
-  /* tabular numbers for counts, times, confidence */
   .nums {
     font-variant-numeric: tabular-nums;
   }
+}
+
+@keyframes blink {
+  50% { opacity: 0.35; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -63,7 +63,9 @@ app = FastAPI(title="Student Helpdesk Triage API", version="1.0", lifespan=lifes
               dependencies=[Depends(require_auth)])
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
+    allow_origins=os.getenv("CORS_ORIGINS", ",".join(
+        f"http://localhost:{p}" for p in range(5173, 5200)
+    ) + ",http://127.0.0.1:5173").split(","),
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
