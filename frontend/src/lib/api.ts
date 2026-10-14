@@ -1,27 +1,32 @@
 // Single seam between the UI and the backend. With VITE_USE_MOCK=1 every call resolves
 // from lib/mock.ts instead of the network, so the UI runs with no backend (Design.md section 8).
 import { ApiError, mock } from "./mock";
+import { AUTH_REQUIRED_EVENT, getToken, setToken } from "./auth";
 import type {
   CreateEmailBody, EmailDetail, EmailRow, EvalsResponse, Harness, Health, Metrics, PolicySection, RunState, Stats,
 } from "./types";
 
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK === "1";
 export const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-export const API_KEY = import.meta.env.VITE_API_KEY || "";
 export { ApiError };
 
-async function json<T>(path: string, init?: RequestInit): Promise<T> {
+async function json<T>(path: string, init?: RequestInit, extra?: Record<string, string>): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
       headers: {
         ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+        ...(getToken() ? { "X-Auth": getToken() } : {}),
+        ...(extra ?? {}),
       },
     });
   } catch {
     throw new ApiError(0, "Cannot reach the backend. Is it running on " + API_BASE + "?");
+  }
+  if (res.status === 401 && path !== "/api/login") {
+    setToken(""); // expired or wrong token: show the login screen again
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
   }
   if (!res.ok) {
     let msg = res.statusText;
@@ -47,6 +52,18 @@ export const api = {
   getHarness: (): Promise<Harness> => (USE_MOCK ? mock.getHarness() : json("/api/harness")),
   getEvals: (): Promise<EvalsResponse> => (USE_MOCK ? mock.getEvals() : json("/api/evals")),
   getRun: (): Promise<RunState> => (USE_MOCK ? mock.getRun() : json("/api/run")),
+
+  login: async (password: string): Promise<void> => {
+    const r = await json<{ token: string }>("/api/login", { method: "POST", body: JSON.stringify({ password }) });
+    setToken(r.token);
+  },
+
+  // Fetch the Gmail label, process it, optionally save reply DRAFTS (nothing is ever sent).
+  gmailFetch: (createDrafts: boolean, adminKey: string): Promise<RunState> =>
+    USE_MOCK
+      ? Promise.reject(new ApiError(0, "Gmail is not available in mock mode."))
+      : json("/api/gmail/fetch", { method: "POST", body: JSON.stringify({ create_drafts: createDrafts }) },
+          adminKey ? { "X-Admin-Key": adminKey } : undefined),
 
   createEmail: (body: CreateEmailBody): Promise<{ id: string; processing: boolean; run: RunState }> =>
     USE_MOCK

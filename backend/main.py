@@ -4,7 +4,6 @@ Run from the repo root:  uvicorn backend.main:app --port 8000
 There is deliberately no endpoint that sends email; replies are drafts in outbox.json only.
 """
 import asyncio
-import hmac
 import json
 import os
 from contextlib import asynccontextmanager
@@ -14,8 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.config import load_settings
-from backend.service import GmailNotReady, LogTail, NotFound, Protected, Service
+from app.config import ROOT, load_settings
+from backend import auth
+from backend.service import GmailNotReady, LogTail, NotFound, Protected, RateLimited, Service
 
 
 class NewEmail(BaseModel):
@@ -31,6 +31,10 @@ class RunRequest(BaseModel):
     ids: list[str] | None = None  # None = every file in data/inbox
 
 
+class LoginRequest(BaseModel):
+    password: str = Field(max_length=200)
+
+
 class GmailRequest(BaseModel):
     create_drafts: bool = False  # saves reply drafts in Gmail; nothing is ever sent
 
@@ -38,22 +42,25 @@ class GmailRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.svc = Service(load_settings())
+    app.state.svc.store.seed(ROOT / "data" / "inbox", ROOT / "samples")  # only when the database is empty
     yield
 
 
-def require_key(request: Request) -> None:
-    """Optional shared-secret check: off when API_KEY is unset. EventSource cannot set headers,
-    so /api/events also accepts ?api_key=. Guards casual access only (the key ships in the UI bundle)."""
-    key = os.getenv("API_KEY", "")
-    if not key or request.url.path == "/api/health":
+OPEN_PATHS = {"/api/health", "/api/login"}
+
+
+def require_auth(request: Request) -> None:
+    """Off when DEMO_PASSWORD is unset. Otherwise a token from /api/login is needed: header X-Auth, or
+    ?auth= for /api/events (EventSource cannot set headers)."""
+    if not auth.auth_required() or request.url.path in OPEN_PATHS:
         return
-    given = request.headers.get("x-api-key") or request.query_params.get("api_key", "")
-    if not hmac.compare_digest(given.encode(), key.encode()):
-        raise HTTPException(401, "missing or wrong API key")
+    given = request.headers.get("x-auth") or request.query_params.get("auth", "")
+    if not auth.token_ok(given):
+        raise HTTPException(401, "login required")
 
 
 app = FastAPI(title="Student Helpdesk Triage API", version="1.0", lifespan=lifespan,
-              dependencies=[Depends(require_key)])
+              dependencies=[Depends(require_auth)])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
@@ -68,7 +75,16 @@ def svc(request: Request) -> Service:
 
 @app.get("/api/health")
 def health(request: Request) -> dict:
-    return svc(request).health()
+    return {**svc(request).health(), "auth_required": auth.auth_required()}
+
+
+@app.post("/api/login")
+def login(payload: LoginRequest) -> dict:
+    if not auth.auth_required():
+        return {"token": "", "auth_required": False}
+    if not auth.password_ok(payload.password):
+        raise HTTPException(401, "wrong password")
+    return {"token": auth.make_token(), "auth_required": True}
 
 
 @app.get("/api/emails")
@@ -90,7 +106,10 @@ def create_email(payload: NewEmail, request: Request) -> dict:
         raise HTTPException(422, "subject or body is required")
     service = svc(request)
     email_id = service.create_email(payload.from_name, payload.from_email, payload.subject, payload.body)
-    run = service.start_run([email_id]) if payload.process else None
+    try:
+        run = service.start_run([email_id]) if payload.process else None
+    except RateLimited as exc:
+        raise HTTPException(429, str(exc))
     return {"id": email_id, "processing": payload.process, "run": run}
 
 
@@ -110,6 +129,8 @@ def reprocess(email_id: str, request: Request) -> dict:
         return svc(request).reprocess(email_id)
     except NotFound:
         raise HTTPException(404, "email not found")
+    except RateLimited as exc:
+        raise HTTPException(429, str(exc))
 
 
 @app.post("/api/process", status_code=202)
@@ -118,15 +139,22 @@ def process(payload: RunRequest, request: Request) -> dict:
         return svc(request).start_run(payload.ids, payload.only_new)
     except NotFound as exc:
         raise HTTPException(422, f"unknown email id: {exc}")
+    except RateLimited as exc:
+        raise HTTPException(429, str(exc))
 
 
 @app.post("/api/gmail/fetch", status_code=202)
 def gmail_fetch(payload: GmailRequest, request: Request) -> dict:
-    """Fetch the configured Gmail label (read-only), process it, optionally save drafts. Never sends."""
+    """Fetch the configured Gmail label (read-only), process it, optionally save drafts. Never sends.
+    Needs the operator's X-Admin-Key (env ADMIN_KEY) on top of the login."""
+    if not auth.admin_ok(request.headers.get("x-admin-key", "")):
+        raise HTTPException(403, "admin key required for Gmail actions")
     try:
         return svc(request).start_gmail(payload.create_drafts)
     except GmailNotReady as exc:
         raise HTTPException(409, str(exc))
+    except RateLimited as exc:
+        raise HTTPException(429, str(exc))
 
 
 @app.get("/api/outbox")

@@ -33,6 +33,7 @@ class Call:
 class FakeService:
     def __init__(self):
         self.created: list[dict] = []
+        self.existing: list[dict] = []
 
     def users(self):
         return self
@@ -53,6 +54,9 @@ class FakeService:
         outer = self
 
         class D:
+            def list(self, **kw):
+                return Call({"drafts": outer.existing})
+
             def create(self, userId, body):
                 outer.created.append(body)
                 return Call({"id": "d1"})
@@ -82,11 +86,31 @@ def test_create_draft_is_threaded_reply():
     assert "hamza@example.com" in mime["To"]
 
 
+def test_create_draft_skips_a_thread_that_already_has_one():
+    svc = FakeService()
+    svc.existing = [{"id": "old", "message": {"id": "x", "threadId": "t1"}}]
+    rec = fallback_record(EmailIn(id="m1", from_name="Hamza Q"), "t")
+    assert create_draft(svc, rec) == "old" and svc.created == []
+
+
+def test_deployed_token_comes_from_the_env_and_no_file_is_written(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    from app import gmail
+
+    token = {"token": "t", "refresh_token": "r", "client_id": "c", "client_secret": "s",
+             "token_uri": "https://oauth2.googleapis.com/token", "scopes": gmail.SCOPES}
+    monkeypatch.setenv("GMAIL_TOKEN_JSON", json.dumps(token))
+    with patch.object(gmail, "build", return_value="svc") as build, patch.object(gmail.Credentials, "refresh"):
+        assert gmail.get_service(tmp_path) == "svc"
+    assert build.call_args.kwargs["credentials"].refresh_token == "r" and list(tmp_path.iterdir()) == []
+
+
 def test_scopes_are_readonly_and_compose_only():
     assert [s.rsplit("/", 1)[1] for s in SCOPES] == ["gmail.readonly", "gmail.compose"]
 
 
 def test_codebase_never_sends_mail():
     forbidden = re.compile(r"\.send\s*\(|send_message|smtplib|gmail\.send|mail\.google\.com/|\.send\b\s*\(")
-    files = [p for p in [ROOT / "agent.py", *(ROOT / "app").glob("*.py")]]
+    files = [p for p in [ROOT / "agent.py", *(ROOT / "app").glob("*.py"), *(ROOT / "backend").glob("*.py")]]
     assert [p.name for p in files if forbidden.search(p.read_text(encoding="utf-8"))] == []

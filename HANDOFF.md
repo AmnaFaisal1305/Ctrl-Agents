@@ -2,7 +2,7 @@
 
 Session state. **Section A is the single up-to-date picture; read it first.** Section B is the short history, newest first. Update both at the end of every session.
 
-Last updated: 2026-10-14, end of session 3. Session 3 part 2 (observability, reflection, Quality page) may be uncommitted: check `git status`. Local `main` is ahead of `origin/main` and nothing is pushed.
+Last updated: 2026-10-14, session 4 (deployment code written, not yet deployed; see B, session 4). The A1 table below predates session 4: the backend now uses SQLite and a login instead of `API_KEY`, and has `/api/metrics`, `/api/harness`, `/api/evals` and `app/reflect.py` (shadow critic) from earlier work. Session 3 part 2 (observability, reflection, Quality page) may be uncommitted: check `git status`. Local `main` is ahead of `origin/main` and nothing is pushed.
 
 ---
 
@@ -95,6 +95,14 @@ Quota discipline: single emails while tuning; the full sets only at gates.
 ---
 
 # B. Session history (newest first)
+
+## Session 4 (2026-10-14): architecture page and deployment code
+- `docs/architecture.html`: hand-drawn SVG diagrams (layers, pipeline, agent graph, sequence, backend, deploy, Gmail).
+- Decisions (plan `fizzy-forging-simon`): React on Vercel, FastAPI on Render free, SQLite for web state re-seeded from samples on boot, Gmail stays on (personal account, Testing token), demo password plus `ADMIN_KEY` for Gmail, `DAILY_LLM_CAP`.
+- Built: `backend/store.py`, `backend/auth.py`, service on the store, `/api/login`, admin-key check and 429 cap, `GMAIL_TOKEN_JSON` + thread-level draft check, UI `Login` and `GmailPanel`, `render.yaml`, env examples, README Deploy section.
+- Verified (ran): `pytest` 55 passed; local uvicorn with `DEMO_PASSWORD`: 401 without token, login, 20 seeded rows with 0 LLM calls, Gmail 403 without the admin key, one real Gemini email (done, FEE-2, 6 steps) then deleted; `npm run build` OK; browser: login screen, sign-in, dashboard with Gmail panel.
+- **Not done / needs you:** deploy on Render and Vercel (needs your accounts and secrets); real Gmail draft test (label `helpdesk` is empty; token must be within 7 days); `python agent.py --only-new` (file mode, 0 LLM calls) and `evals --outbox` (0 problems) re-run OK after the loader change; a full 20-email run is still due at the freeze; Reprocess and mobile UI checks still open; tell the teammate their `App.tsx`, `api.ts`, `sse.ts`, `types.ts`, `Dashboard.tsx` were touched and `Login.tsx`, `GmailPanel.tsx`, `auth.ts` added.
+- Risk to say out loud: personal Gmail on a public URL (password + admin key only), Render cold start, data reset on restart.
 
 ## Session 3, part 2 (2026-10-14): observability, reflection, context and evals in the UI
 - Plan: `C:/Users/ahmed/.claude/plans/tidy-spinning-stallman.md`. Decisions: local tracing only (no LangSmith/Langfuse, so no email text leaves the machine and no new dependency); features must not change accuracy.

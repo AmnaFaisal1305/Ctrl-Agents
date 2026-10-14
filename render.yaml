@@ -1,0 +1,31 @@
+# Render blueprint for the backend (free web service). The frontend is deployed separately on Vercel.
+# Secrets are NOT stored here: create them in the Render dashboard (sync: false).
+services:
+  - type: web
+    name: helpdesk-triage-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.5
+      - key: DB_PATH          # the disk is wiped on restart; the database is re-seeded from the repo samples
+        value: /tmp/helpdesk.db
+      - key: LOGS_DIR
+        value: /tmp/helpdesk-logs
+      - key: DAILY_LLM_CAP
+        value: "300"
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GMAIL_TOKEN_JSON  # contents of secrets/token.json, made locally with `python agent.py --gmail`
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: AUTH_SECRET
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: CORS_ORIGINS     # the Vercel URL, e.g. https://helpdesk-triage.vercel.app
+        sync: false

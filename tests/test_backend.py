@@ -11,7 +11,8 @@ from tests.test_agent import FakeModel, submit_args
 
 
 def make_service(tmp_path: Path, calls=None) -> Service:
-    s = replace(load_settings(), inbox=tmp_path / "inbox", outbox=tmp_path / "outbox.json", logs=tmp_path / "logs", workers=1)
+    s = replace(load_settings(), inbox=tmp_path / "inbox", outbox=tmp_path / "outbox.json", logs=tmp_path / "logs", workers=1,
+                db_path=tmp_path / "t.db")
     s.inbox.mkdir()
     model = FakeModel(calls or [("LookupPolicy", {"reason": "fees", "section": "Fees"}), ("Submit", submit_args())])
     return Service(s, model=model)
@@ -39,7 +40,7 @@ def test_rows_merge_and_pending_status(tmp_path):
     assert {e["id"]: e["status"] for e in svc.list_emails()} == {a: "done", b: "pending"}
     svc.start_run([b])
     svc.wait_idle()
-    assert len(json.loads((tmp_path / "outbox.json").read_text(encoding="utf-8"))) == 2
+    assert len(svc.outbox_rows()) == 2
 
 
 def test_no_model_still_writes_fallback_row(tmp_path):
@@ -83,7 +84,7 @@ def test_policy_view_lists_sections(tmp_path):
 def fake_request(svc):
     from types import SimpleNamespace
 
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(svc=svc)))
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(svc=svc)), headers={})
 
 
 def test_start_run_rejects_unknown_ids(tmp_path):
@@ -109,12 +110,12 @@ def test_delete_only_web_emails(tmp_path):
     web = svc.create_email("Sara", "", "hi", "hello there")
     svc.start_run([web])
     svc.wait_idle()
-    (svc.s.inbox / "E001.json").write_text(json.dumps({"id": "E001", "subject": "s", "body": "b"}), encoding="utf-8")
+    svc.store.put_email("E001", json.dumps({"id": "E001", "subject": "s", "body": "b"}))
     with pytest.raises(Exception) as err:
         svc.delete_email("E001")
-    assert type(err.value).__name__ == "Protected" and (svc.s.inbox / "E001.json").exists()
+    assert type(err.value).__name__ == "Protected" and svc.store.email_raw("E001")
     svc.delete_email(web)
-    assert svc.outbox_rows() == [] and not (svc.s.inbox / f"{web}.json").exists() and svc.steps(web) == []
+    assert svc.outbox_rows() == [] and svc.store.email_raw(web) is None and svc.steps(web) == []
 
 
 def test_job_error_is_reported_not_swallowed(tmp_path):
@@ -143,7 +144,7 @@ def test_gmail_requires_token_then_fetches_and_drafts_only_on_request(tmp_path, 
 
     drafts = []
     monkeypatch.setattr(agent, "gmail_fetch", fake_fetch)
-    monkeypatch.setattr(agent, "save_drafts", lambda service, records, ids, logs: drafts.append([r.email_id for r in records]))
+    monkeypatch.setattr(agent, "save_drafts", lambda service, records, ids, logs, done=None: drafts.append([r.email_id for r in records]))
     svc.start_gmail(create_drafts=False)
     svc.wait_idle()
     assert [r["email_id"] for r in svc.outbox_rows()] == ["g1"] and drafts == []
@@ -179,28 +180,77 @@ def test_routes_validate_input_and_map_errors(tmp_path):
     assert e.value.status_code == 404
 
 
-def test_api_key_is_optional_and_checked_when_set(monkeypatch):
-    from fastapi import HTTPException
+def _req(path="/api/emails", headers=None, query=""):
     from starlette.requests import Request
+
+    scope = {"type": "http", "path": path, "query_string": query.encode(),
+             "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
+    return Request(scope)
+
+
+def test_login_token_gates_the_api_when_a_password_is_set(monkeypatch):
+    from fastapi import HTTPException
+
+    from backend import auth, main
+
+    monkeypatch.delenv("DEMO_PASSWORD", raising=False)
+    main.require_auth(_req())  # unset: open (local dev)
+    assert main.login(main.LoginRequest(password="x")) == {"token": "", "auth_required": False}
+    monkeypatch.setenv("DEMO_PASSWORD", "pw")
+    monkeypatch.setenv("AUTH_SECRET", "sign-key")
+    with pytest.raises(HTTPException) as e:
+        main.require_auth(_req())
+    assert e.value.status_code == 401
+    with pytest.raises(HTTPException):
+        main.login(main.LoginRequest(password="wrong"))
+    token = main.login(main.LoginRequest(password="pw"))["token"]
+    main.require_auth(_req(headers={"X-Auth": token}))
+    main.require_auth(_req("/api/events", query=f"auth={token}"))
+    main.require_auth(_req("/api/health"))  # health and login stay open
+    main.require_auth(_req("/api/login"))
+    with pytest.raises(HTTPException):
+        main.require_auth(_req(headers={"X-Auth": token[:-1] + ("0" if token[-1] != "0" else "1")}))  # tampered signature
+    assert not auth.token_ok(auth.make_token(now=0))  # expired long ago
+
+
+def test_gmail_needs_the_admin_key_when_deployed(tmp_path, monkeypatch):
+    from fastapi import HTTPException
 
     from backend import main
 
-    def req(path="/api/emails", headers=None, query=""):
-        scope = {"type": "http", "path": path, "query_string": query.encode(),
-                 "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()]}
-        return Request(scope)
-
-    monkeypatch.delenv("API_KEY", raising=False)
-    main.require_key(req())  # unset: open
-    monkeypatch.setenv("API_KEY", "s3cret")
+    svc = make_service(tmp_path)
+    svc.s = replace(svc.s, secrets=tmp_path / "no-secrets")
+    monkeypatch.setenv("DEMO_PASSWORD", "pw")
+    monkeypatch.delenv("ADMIN_KEY", raising=False)
+    req = fake_request(svc)
     with pytest.raises(HTTPException) as e:
-        main.require_key(req())
-    assert e.value.status_code == 401
-    with pytest.raises(HTTPException):
-        main.require_key(req(headers={"X-API-Key": "wrong"}))
-    main.require_key(req(headers={"X-API-Key": "s3cret"}))
-    main.require_key(req("/api/events", query="api_key=s3cret"))
-    main.require_key(req("/api/health"))  # health stays open
+        main.gmail_fetch(main.GmailRequest(), req)  # deployed but no ADMIN_KEY configured: refused
+    assert e.value.status_code == 403
+    monkeypatch.setenv("ADMIN_KEY", "adm")
+    with pytest.raises(HTTPException) as e:
+        main.gmail_fetch(main.GmailRequest(), req)  # wrong key
+    assert e.value.status_code == 403
+    req.headers = {"x-admin-key": "adm"}
+    with pytest.raises(HTTPException) as e:
+        main.gmail_fetch(main.GmailRequest(), req)  # key accepted: now it fails only because Gmail is not authorized
+    assert e.value.status_code == 409
+
+
+def test_daily_llm_cap_returns_429(tmp_path):
+    from fastapi import HTTPException
+
+    from backend import main
+
+    svc = make_service(tmp_path)
+    svc.daily_cap = 3
+    email_id = svc.create_email("Sara", "", "Late fee", "Please waive my late fee.")
+    svc.start_run([email_id])
+    svc.wait_idle()
+    assert svc.store.llm_calls_today() == 2
+    svc.store.add_llm_calls(1)
+    with pytest.raises(HTTPException) as e:
+        main.reprocess(email_id, fake_request(svc))
+    assert e.value.status_code == 429
 
 
 def test_metrics_from_a_real_run_and_synthetic_rows(tmp_path):

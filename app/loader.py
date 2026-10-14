@@ -17,11 +17,20 @@ def clean_text(text: str) -> str:
 def load_email(path: Path) -> EmailIn:
     """Never raises: a bad file becomes an empty EmailIn carrying the reason."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError) as exc:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
         return EmailIn(id=path.stem, load_warnings=[f"unreadable file: {exc}"])
+    return email_from_text(text, path.stem)
+
+
+def email_from_text(text: str, stem: str) -> EmailIn:
+    """Parse the JSON text of one email file (the backend keeps it in SQLite). Never raises."""
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        return EmailIn(id=stem, load_warnings=[f"unreadable file: {exc}"])
     if not isinstance(data, dict):
-        return EmailIn(id=path.stem, load_warnings=["JSON is not an object"])
+        return EmailIn(id=stem, load_warnings=["JSON is not an object"])
     warnings: list[str] = []
     fields: dict[str, str] = {}
     for key in _FIELDS:
@@ -38,7 +47,7 @@ def load_email(path: Path) -> EmailIn:
         warnings.append(f"body shortened to {BODY_LIMIT} characters (head and tail kept)")
     email_id = data.get("id")
     if not isinstance(email_id, str) or not email_id.strip():
-        email_id = path.stem
+        email_id = stem
         warnings.append("missing id; used filename")
     return EmailIn(id=email_id, load_warnings=warnings, **fields)
 

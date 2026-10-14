@@ -89,6 +89,8 @@ export interface Health {
   status: string;
   model: string;
   llm_ready: boolean;
+  gmail_ready?: boolean;
+  auth_required?: boolean;
 }
 
 export interface CreateEmailBody {

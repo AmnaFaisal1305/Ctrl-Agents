@@ -3,10 +3,13 @@
 Reuses the CLI code (agent.process, app.*), so the API and `python agent.py` behave the same.
 """
 import json
+import os
 import re
 import secrets
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -14,12 +17,12 @@ import agent
 from app.config import BODY_LIMIT, MAX_STEPS, WORD_LIMIT, Settings
 from app.graph import MAX_REVISIONS
 from app.llm import make_llm
-from app.loader import load_email, load_inbox
+from app.loader import email_from_text
 from app.models import EmailIn, OutboxRecord
 from app.policy import Policy
 from app.reflect import make_critic, reflect_enabled
-from app.writer import write_outbox
 from backend.metrics import aggregate
+from backend.store import Store, read_jsonl
 
 _SAFE_ID = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
 
@@ -36,9 +39,15 @@ class GmailNotReady(Exception):
     pass
 
 
+class RateLimited(Exception):
+    """The daily LLM-call budget for the public demo is used up."""
+
+
 class Service:
     def __init__(self, settings: Settings, model=None) -> None:
         self.s = settings
+        self.store = Store(settings.db_path)
+        self.daily_cap = int(os.getenv("DAILY_LLM_CAP", "300"))
         self.policy = Policy.parse(settings.policy)
         self.model = model if model is not None else self._make_model()
         self.critic = self._make_critic() if model is None and self.model is not None else None  # tests inject a model and get no critic
@@ -63,25 +72,23 @@ class Service:
 
     # ---- reads -------------------------------------------------------------------------------
     def _records(self) -> dict[str, dict]:
-        try:
-            return {r["email_id"]: r for r in json.loads(self.s.outbox.read_text(encoding="utf-8"))}
-        except (OSError, ValueError, KeyError, TypeError):
-            return {}
+        return self.store.records()
 
-    def _path(self, email_id: str) -> Path:
-        if not _SAFE_ID.match(email_id):
+    def _email(self, email_id: str) -> EmailIn:
+        raw = self.store.email_raw(email_id) if _SAFE_ID.match(email_id) else None
+        if raw is None:
             raise NotFound(email_id)
-        path = self.s.inbox / f"{email_id}.json"
-        if not path.exists():
-            raise NotFound(email_id)
-        return path
+        return email_from_text(raw, email_id)
+
+    def _emails(self) -> list[EmailIn]:
+        return [email_from_text(raw, email_id) for email_id, raw in self.store.emails_raw()]
 
     def state(self) -> dict:
         with self._lock:
             return dict(self._state, pending_ids=list(self._state["pending_ids"]))
 
     def health(self) -> dict:
-        return {"status": "ok", "model": self.s.model, "llm_ready": self.model is not None}
+        return {"status": "ok", "model": self.s.model, "llm_ready": self.model is not None, "gmail_ready": self.gmail_ready()}
 
     def _summary(self, email: EmailIn, records: dict[str, dict], pending: set[str]) -> dict:
         record = records.get(email.id)
@@ -91,29 +98,25 @@ class Service:
 
     def list_emails(self) -> list[dict]:
         records, pending = self._records(), set(self.state()["pending_ids"])
-        return [self._summary(e, records, pending) for e in load_inbox(self.s.inbox)]
+        return [self._summary(e, records, pending) for e in self._emails()]
 
     def detail(self, email_id: str) -> dict:
-        email = load_email(self._path(email_id))
+        email = self._email(email_id)
         out = self._summary(email, self._records(), set(self.state()["pending_ids"]))
         return {**out, "body": email.body, "load_warnings": email.load_warnings, "steps": self.steps(email_id)}
 
     def steps(self, email_id: str) -> list[dict]:
-        path = self.s.logs / f"{email_id}.jsonl"
-        if not _SAFE_ID.match(email_id) or not path.exists():
+        if not _SAFE_ID.match(email_id):
             return []
-        rows = []
-        for line in path.read_text(encoding="utf-8").splitlines():
-            try:
-                rows.append(json.loads(line))
-            except ValueError:
-                continue
-        return rows
+        path = self.s.logs / f"{email_id}.jsonl"
+        if path.exists():  # scratch log of the latest run in this process (live while it runs)
+            return read_jsonl(path)
+        return self.store.steps(email_id)
 
     def stats(self) -> dict:
         rows = list(self._records().values())
         count = lambda key: {k: sum(1 for r in rows if r[key] == k) for k in sorted({r[key] for r in rows})}  # noqa: E731
-        return {"total": len(rows), "emails_in_inbox": len(list(self.s.inbox.glob("*.json"))),
+        return {"total": len(rows), "emails_in_inbox": self.store.email_count(),
                 "escalated": sum(1 for r in rows if r["escalate"]),
                 "needs_human_fallback": sum(1 for r in rows if r["confidence"] == 0.0),
                 "avg_confidence": round(sum(r["confidence"] for r in rows) / len(rows), 2) if rows else 0.0,
@@ -121,7 +124,7 @@ class Service:
 
     def metrics(self) -> dict:
         """Observability numbers aggregated from logs/*.jsonl (the latest run of each email)."""
-        return aggregate({p.stem: self.steps(p.stem) for p in sorted(self.s.logs.glob("*.jsonl"))})
+        return aggregate(self.store.all_steps())
 
     def harness(self) -> dict:
         """The guard rails around the model, from the real constants (shown on the Observability page)."""
@@ -149,7 +152,7 @@ class Service:
         policy, live = self.policy, []
         for row in self.outbox_rows():
             try:
-                problems = property_checks(row, load_email(self._path(row["email_id"])), policy)
+                problems = property_checks(row, self._email(row["email_id"]), policy)
             except NotFound:
                 continue
             live.append({"id": row["email_id"], "passed": not problems, "problems": problems})
@@ -165,39 +168,42 @@ class Service:
         email_id = f"web-{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
         data = {"id": email_id, "from_name": from_name.strip(), "from_email": from_email.strip(),
                 "subject": subject.strip(), "body": body.strip(), "received_at": datetime.now().isoformat(timespec="seconds")}
-        self.s.inbox.mkdir(parents=True, exist_ok=True)
-        (self.s.inbox / f"{email_id}.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.store.put_email(email_id, json.dumps(data, ensure_ascii=False, indent=2))
         return email_id
 
     def start_run(self, ids: list[str] | None = None, only_new: bool = False) -> dict:
         """Queue a run over `ids` (None = every file in the inbox). Returns the run state immediately."""
         for email_id in ids or []:
-            self._path(email_id)  # raises NotFound for unknown or unsafe ids
+            self._email(email_id)  # raises NotFound for unknown or unsafe ids
+        self._check_budget()
         return self._queue(self._run, ids, only_new)
+
+    def _check_budget(self) -> None:
+        if self.daily_cap and self.store.llm_calls_today() >= self.daily_cap:
+            raise RateLimited(f"daily LLM budget of {self.daily_cap} calls is used up; try again tomorrow")
 
     def reprocess(self, email_id: str) -> dict:
         return self.start_run([email_id])
 
     def gmail_ready(self) -> bool:
-        """The OAuth token exists; the browser authorization is done once with `python agent.py --gmail`."""
-        return (self.s.secrets / "token.json").exists()
+        """A token is available: GMAIL_TOKEN_JSON (deployed) or secrets/token.json (made once by `python agent.py --gmail`)."""
+        return bool(os.getenv("GMAIL_TOKEN_JSON")) or (self.s.secrets / "token.json").exists()
 
     def start_gmail(self, create_drafts: bool = False) -> dict:
         if not self.gmail_ready():
-            raise GmailNotReady("Gmail is not authorized yet: run `python agent.py --gmail` once in a terminal.")
+            raise GmailNotReady("Gmail is not authorized yet: run `python agent.py --gmail` once locally and set GMAIL_TOKEN_JSON.")
+        self._check_budget()
         return self._queue(self._gmail_job, create_drafts)
 
     def delete_email(self, email_id: str) -> None:
         """Remove an email added through the API (web-*) with its row and log. Sample and Gmail emails are protected."""
-        path = self._path(email_id)
+        self._email(email_id)
         if not email_id.startswith("web-"):
             raise Protected(email_id)
         if email_id in self.state()["pending_ids"]:
             raise Protected(f"{email_id} is being processed")
         with self._io:
-            rows = {k: v for k, v in self._records().items() if k != email_id}
-            write_outbox([OutboxRecord(**v) for v in rows.values()], self.s.outbox)
-            path.unlink(missing_ok=True)
+            self.store.delete_email(email_id)
         (self.s.logs / f"{email_id}.jsonl").unlink(missing_ok=True)
 
     def outbox_rows(self) -> list[dict]:
@@ -223,8 +229,9 @@ class Service:
                 self._state.update(running=False, pending_ids=[])
 
     def _run(self, ids: list[str] | None, only_new: bool) -> None:
-        emails = [e for e in load_inbox(self.s.inbox) if ids is None or e.id in ids]
-        reused = agent.reusable_rows(emails, self.s.outbox, self.s.logs) if only_new else {}
+        emails = [e for e in self._emails() if ids is None or e.id in ids]
+        records = self._records()
+        reused = {e.id for e in emails if only_new and e.id in records and self.store.get_meta(f"seen:{e.id}") == agent.email_hash(e)}
         self._process([e for e in emails if e.id not in reused])
 
     def _process(self, todo: list[EmailIn]) -> None:
@@ -236,6 +243,7 @@ class Service:
             for future in as_completed(futures):
                 record, calls = future.result()
                 self._save(record, by_id[record.email_id])
+                self.store.add_llm_calls(calls)
                 with self._lock:
                     self._state["done"] += 1
                     self._state["llm_calls"] += calls
@@ -243,26 +251,25 @@ class Service:
 
     def _gmail_job(self, create_drafts: bool) -> None:
         """Fetch the Gmail label into the inbox, process what was fetched, optionally save DRAFTS (never sent)."""
-        service, ids = agent.gmail_fetch(self.s)
-        self._process([e for e in load_inbox(self.s.inbox) if e.id in ids])
+        with tempfile.TemporaryDirectory() as scratch:  # fetched files are only a hand-off into the database
+            service, ids = agent.gmail_fetch(replace(self.s, inbox=Path(scratch)))
+            for path in sorted(Path(scratch).glob("*.json")):
+                self.store.put_email(path.stem, path.read_text(encoding="utf-8"))
+        self._process([e for e in self._emails() if e.id in ids])
         if create_drafts:
             records = [OutboxRecord(**r) for r in self._records().values() if r["email_id"] in ids]
-            agent.save_drafts(service, records, ids, self.s.logs)
+            done = self.store.get_meta("gmail_drafts", {})
+            agent.save_drafts(service, records, ids, self.s.logs, done=done)
+            self.store.set_meta("gmail_drafts", done)
 
     def _save(self, record: OutboxRecord, email: EmailIn) -> None:
-        """Merge one finished row into outbox.json (so the UI sees it at once) and remember the email hash."""
+        """Store one finished row (the UI sees it at once), its step log and the email hash."""
         with self._io:
-            rows = {k: OutboxRecord(**v) for k, v in self._records().items()}
-            rows[record.email_id] = record
-            write_outbox(list(rows.values()), self.s.outbox)
-            seen_file = self.s.logs / "seen.json"
-            try:
-                seen = json.loads(seen_file.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                seen = {}
-            seen[email.id] = agent.email_hash(email)
-            self.s.logs.mkdir(parents=True, exist_ok=True)
-            seen_file.write_text(json.dumps(seen), encoding="utf-8")
+            self.store.put_record(record.model_dump())
+            self.store.set_meta(f"seen:{email.id}", agent.email_hash(email))
+            log = self.s.logs / f"{email.id}.jsonl"
+            if log.exists():
+                self.store.set_steps(email.id, read_jsonl(log))
 
     def wait_idle(self, timeout: float = 60.0) -> None:
         """For tests and scripts: block until queued runs finish."""

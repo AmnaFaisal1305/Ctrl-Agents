@@ -2,7 +2,8 @@
 // VITE_USE_MOCK); components subscribe via useEventStream. Falls back to polling /api/run
 // every 2s if the stream errors (Design.md section 7).
 import { useEffect, useRef } from "react";
-import { API_BASE, API_KEY, USE_MOCK, api } from "./api";
+import { API_BASE, USE_MOCK, api } from "./api";
+import { getToken } from "./auth";
 import { subscribeMock } from "./mock";
 import type { RunState, Step } from "./types";
 
@@ -35,7 +36,8 @@ function ensureOpen() {
     return;
   }
   if (es) return;
-  es = new EventSource(`${API_BASE}/api/events${API_KEY ? `?api_key=${encodeURIComponent(API_KEY)}` : ""}`);
+  const token = getToken();
+  es = new EventSource(`${API_BASE}/api/events${token ? `?auth=${encodeURIComponent(token)}` : ""}`);
   es.addEventListener("step", (e) => fanStep(JSON.parse((e as MessageEvent).data)));
   es.addEventListener("run", (e) => fanRun(JSON.parse((e as MessageEvent).data)));
   es.onopen = stopPolling; // stream healthy -> drop the fallback

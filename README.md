@@ -47,7 +47,16 @@ Read-only plus drafts: scopes `gmail.readonly` and `gmail.compose`. Nothing is e
 uvicorn backend.main:app --port 8000      # run from the repo root; docs at http://localhost:8000/docs
 ```
 
-`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, `GET /api/metrics`, `GET /api/harness`, `GET /api/evals`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The frontend brief and full API table are in `frontend/Design.md`.
+`GET /api/emails`, `GET /api/emails/{id}` (with step timeline), `POST /api/emails` (add and process), `DELETE /api/emails/{id}` (only emails added through the API), `POST /api/emails/{id}/reprocess`, `POST /api/process`, `POST /api/gmail/fetch` (read-only fetch, optional drafts), `GET /api/run`, `GET /api/outbox`, `GET /api/stats`, `GET /api/policy`, `GET /api/metrics`, `GET /api/harness`, `GET /api/evals`, and a live stream at `GET /api/events` (SSE). There is no send endpoint. The web backend keeps its state in SQLite (`DB_PATH`, default `.data/helpdesk.db`), seeded from `data/inbox/E*.json` and `samples/` when empty; `python agent.py` stays file-based. The frontend brief and full API table are in `frontend/Design.md`.
+
+## Deploy (Vercel frontend + Render backend)
+
+1. **Gmail token (once, locally, within 7 days of the demo):** `python agent.py --gmail`, then copy the contents of `secrets/token.json` into the `GMAIL_TOKEN_JSON` env var on Render.
+2. **Backend on Render:** create a web service from this repo (`render.yaml` is a blueprint). Set the secrets in the dashboard: `GOOGLE_API_KEY`, `GMAIL_TOKEN_JSON`, `DEMO_PASSWORD`, `AUTH_SECRET`, `ADMIN_KEY`, and `CORS_ORIGINS` (the Vercel URL). Optional `DAILY_LLM_CAP` (default 300).
+3. **Frontend on Vercel:** root directory `frontend`, build `npm run build`, output `dist`, env `VITE_API_URL` = the Render URL.
+4. **Use:** open the Vercel URL and sign in with `DEMO_PASSWORD`. Gmail fetch and drafts need the admin key, typed in the dashboard (never bundled). Drafts only; nothing is sent.
+
+Free-tier notes: Render sleeps when idle (open `/api/health` a minute before the demo); a restart wipes the disk, so the database re-seeds from the 20 samples (Gmail drafts stay in Gmail, and a draft already in a thread is never duplicated).
 
 ## Observability
 

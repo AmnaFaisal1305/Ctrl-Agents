@@ -5,6 +5,7 @@ send endpoint (tests/test_gmail.py greps the code base for that).
 """
 import base64
 import json
+import os
 from email.message import EmailMessage
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
@@ -23,7 +24,15 @@ SCOPES = [
 
 
 def get_service(secrets: Path):
-    """OAuth desktop flow; opens a browser only when token.json is missing or unusable."""
+    """OAuth desktop flow; opens a browser only when token.json is missing or unusable.
+
+    Deployed (GMAIL_TOKEN_JSON set): use that token, refresh it in memory, never write a file or open a browser."""
+    token_json = os.getenv("GMAIL_TOKEN_JSON")
+    if token_json:
+        creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+        if not creds.valid:
+            creds.refresh(Request())
+        return build("gmail", "v1", credentials=creds, cache_discovery=False)
     token_path = secrets / "token.json"
     creds = None
     if token_path.exists():
@@ -85,6 +94,12 @@ def fetch_inbox(service, inbox: Path, query: str, limit: int) -> list[str]:
     return ids
 
 
+def _draft_in_thread(service, thread_id: str) -> str:
+    """Id of a draft already saved in this thread, or ''. Read-only."""
+    drafts = service.users().drafts().list(userId="me", maxResults=100).execute().get("drafts", [])
+    return next((d["id"] for d in drafts if d.get("message", {}).get("threadId") == thread_id), "")
+
+
 def create_draft(service, record: OutboxRecord) -> str:
     """Save record.reply_draft as a threaded Gmail draft replying to the original message. Returns the draft id."""
     msg = service.users().messages().get(userId="me", id=record.email_id, format="metadata",
@@ -98,6 +113,9 @@ def create_draft(service, record: OutboxRecord) -> str:
         reply["In-Reply-To"] = reply["References"] = h["message-id"]
     reply.set_content(record.reply_draft)
     raw = base64.urlsafe_b64encode(reply.as_bytes()).decode()
+    existing = _draft_in_thread(service, msg["threadId"])
+    if existing:  # the host's disk is wiped on restart, so Gmail itself is the source of truth against duplicates
+        return existing
     draft = service.users().drafts().create(
         userId="me", body={"message": {"raw": raw, "threadId": msg["threadId"]}}).execute()
     return draft["id"]

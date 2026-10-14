@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatCard } from "@/components/StatCard";
 import { BreakdownBars } from "@/components/BreakdownBars";
 import { RunBar } from "@/components/RunBar";
+import { GmailPanel } from "@/components/GmailPanel";
 import { LiveFeed } from "@/components/LiveFeed";
 import { PriorityBadge } from "@/components/PriorityBadge";
 import { EscalateBadge } from "@/components/EscalateBadge";
@@ -129,6 +130,7 @@ export default function Dashboard() {
         )}
         <div className="space-y-4">
           <RunBar run={run} onProcessAll={processAll} />
+          <GmailPanel run={run} onStarted={setRun} />
         </div>
       </div>
 

@@ -45,12 +45,17 @@ def reusable_rows(emails: list[EmailIn], outbox: Path, logs: Path) -> dict[str, 
     return {e.id: rows[e.id] for e in emails if e.id in rows and seen.get(e.id) == email_hash(e)}
 
 
-def save_drafts(service, records: list[OutboxRecord], gmail_ids: set[str], logs: Path) -> None:
-    """Mirror reply_draft into Gmail DRAFTS (never sent) for mail fetched this run; skip ones already drafted."""
+def save_drafts(service, records: list[OutboxRecord], gmail_ids: set[str], logs: Path, done: dict[str, str] | None = None) -> None:
+    """Mirror reply_draft into Gmail DRAFTS (never sent) for mail fetched this run; skip ones already drafted.
+
+    `done` (email id -> draft id) is kept by the caller when given (the backend stores it in SQLite);
+    otherwise it lives in logs/gmail_drafts.json."""
     from app.gmail import create_draft
 
     state_file = logs / "gmail_drafts.json"
-    done: dict[str, str] = json.loads(state_file.read_text(encoding="utf-8")) if state_file.exists() else {}
+    own_state = done is None
+    if own_state:
+        done = json.loads(state_file.read_text(encoding="utf-8")) if state_file.exists() else {}
     for rec in records:
         if rec.email_id not in gmail_ids or rec.email_id in done:
             continue
@@ -59,8 +64,9 @@ def save_drafts(service, records: list[OutboxRecord], gmail_ids: set[str], logs:
             log_step(logs, rec.email_id, 99, "rule", "gmail_draft", f"draft saved ({done[rec.email_id]})")
         except Exception as exc:  # one failed draft must not stop the run
             log_step(logs, rec.email_id, 99, "rule", "gmail_draft", f"draft failed: {type(exc).__name__}")
-    logs.mkdir(parents=True, exist_ok=True)
-    state_file.write_text(json.dumps(done, indent=2), encoding="utf-8")
+    if own_state:
+        logs.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(done, indent=2), encoding="utf-8")
 
 
 def gmail_fetch(settings: Settings):
