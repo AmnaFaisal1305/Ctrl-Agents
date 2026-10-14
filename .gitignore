@@ -8,3 +8,11 @@ secrets/*
 !secrets/.gitkeep
 *.tmp
 .pytest_cache/
+
+# Gmail-fetched mail is personal data: only the sample E*.json emails are tracked
+data/inbox/*.json
+!data/inbox/E*.json
+
+# stray copies of OAuth client files
+docs/credentials*
+*client_secret*.json

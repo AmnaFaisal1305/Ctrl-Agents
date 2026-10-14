@@ -2,6 +2,14 @@
 
 Updated at the end of every session. Newest session at the top. Keep it short and factual.
 
+## Session 1b (Gmail)
+
+- Added `app/gmail.py` (OAuth desktop flow, `fetch_inbox`, `create_draft`), `--gmail` and `--no-drafts` in `agent.py`, `tests/test_gmail.py` (fake service; also greps the code for any send call). Gmail deps pinned in `requirements.txt`. Fetched Gmail files and `docs/credentials*` are gitignored.
+- OAuth succeeded (`secrets/token.json` created). `python agent.py --gmail --no-drafts` fetched **0** messages for `label:helpdesk`: the label needs test emails.
+- Testing-mode token expires after 7 days: delete `secrets/token.json` and re-run if `invalid_grant`.
+- Not yet verified against real mail: fetch of a real message, and draft creation (no draft has been created yet; the agent is still a stub, drafts would hold the fallback text).
+- Next: put 3 to 5 emails under the `helpdesk` label, run `--gmail --no-drafts`, then one `--gmail` run and check Drafts and Sent in Gmail.
+
 ## Session 1 (docs + scaffold)
 
 **Date:** 2026-10-14

@@ -19,6 +19,9 @@ class Settings:
     model: str
     workers: int
     use_cache: bool
+    secrets: Path
+    gmail_query: str
+    gmail_max: int
 
 
 def load_settings() -> Settings:
@@ -31,4 +34,7 @@ def load_settings() -> Settings:
         model=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
         workers=int(os.getenv("WORKERS", "2")),
         use_cache=os.getenv("USE_CACHE", "0") == "1",
+        secrets=Path(os.getenv("SECRETS_DIR", ROOT / "secrets")),
+        gmail_query=os.getenv("GMAIL_QUERY", "label:helpdesk"),
+        gmail_max=int(os.getenv("GMAIL_MAX", "50")),
     )
