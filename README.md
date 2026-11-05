@@ -90,8 +90,9 @@ jupyter notebook analysis/eda.ipynb   # Run All Cells
 |---|---|
 | `analysis/generate_data.py` | Generates 400 labelled synthetic student emails across 9 categories |
 | `analysis/data/synthetic_emails.csv` | Pre-generated dataset (400 rows, already committed) |
-| `analysis/eda.ipynb` | EDA → preprocessing → three classifiers (LR / NB / SVM) → confusion matrix, cross-validation, feature importance, LLM comparison |
-| `analysis/plots/` | All 10 charts saved here when the notebook runs |
+| `analysis/eda.ipynb` | EDA → preprocessing → three classifiers (LR / NB / SVM) → confusion matrix, cross-validation, tuning + ensemble, feature importance, LLM comparison |
+| `analysis/plots/` | All 11 charts saved here when the notebook runs |
+| `docs/TECHNICAL_REPORT.md` | Written-up CCA report: problem, datasets, methodology, results, challenges |
 
 The trained classifier predicts `category` and `priority` from email text and is compared against the LLM agent. The agent's core pipeline (reply drafting, policy lookup, escalation) is unchanged.
 
@@ -107,7 +108,7 @@ python agent.py --only-new               # reuse rows for unchanged emails
 
 ## Status
 
-All 20 sample emails produce valid rows: with the shadow reviewer on a full run is 60 LLM calls and about 2 minutes; with `REFLECT=0` about 40 calls and 1 minute. Sample output and step logs are in `samples/`. The unit tests (LLM and Gmail mocked) pass; the adversarial tuning suite passes 12 of 12. The design, schemas and decisions are in `ARCHITECTURE.md`.
+All 20 sample emails produce valid rows: with the shadow reviewer on a full run is 60 LLM calls and about 2 minutes; with `REFLECT=0` about 40 calls and 1 minute. Sample output and step logs are in `samples/`. The unit tests (LLM and Gmail mocked) pass; the adversarial tuning suite passes 12 of 12. The design, schemas and decisions are in `docs/ARCHITECTURE.md`.
 
 ## Building the submission zip
 
