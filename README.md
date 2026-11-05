@@ -64,6 +64,8 @@ uvicorn backend.main:app --port 8000      # run from the repo root; docs at http
 
 ## Deploy (Vercel frontend + Render backend)
 
+**Live deployment:** [`ctrl-agents-brown.vercel.app`](https://ctrl-agents-brown.vercel.app) (GitHub: `AmnaFaisal1305/Ctrl-Agents`)
+
 1. **Gmail token (once, locally, within 7 days of the demo):** `python agent.py --gmail`, then copy the contents of `secrets/token.json` into the `GMAIL_TOKEN_JSON` env var on Render.
 2. **Backend on Render:** create a web service from this repo (`render.yaml` is a blueprint). Set the secrets in the dashboard: `GOOGLE_API_KEY`, `GMAIL_TOKEN_JSON`, `DEMO_PASSWORD`, `AUTH_SECRET`, `ADMIN_KEY`, and `CORS_ORIGINS` (the Vercel URL). Optional `DAILY_LLM_CAP` (default 300).
 3. **Frontend on Vercel:** root directory `frontend`, build `npm run build`, output `dist`, env `VITE_API_URL` = the Render URL.
@@ -74,6 +76,24 @@ Free-tier notes: Render sleeps when idle (open `/api/health` a minute before the
 ## Observability
 
 Every step is logged to `logs/<email_id>.jsonl` with latency, token counts and context sizes. The React console adds an **Observability** page (latency, tokens, validator rejections and self-healing, harness budgets and guards, critic verdicts), a **Quality** page (property checks on the current outbox, tuning and held-out suite results) and per-email **Context** and **Reflection** cards. A second model reviews each final reply in shadow mode (it never changes the row; `REFLECT=0` disables it). Everything is local: no data is sent to a tracing service.
+
+## Analysis (CCA — CT-264 Programming for AI)
+
+A separate analysis layer satisfies the course CCA requirements without touching the agent.
+
+```
+pip install -r analysis/requirements.txt
+jupyter notebook analysis/eda.ipynb   # Run All Cells
+```
+
+| File | Purpose |
+|---|---|
+| `analysis/generate_data.py` | Generates 400 labelled synthetic student emails across 9 categories |
+| `analysis/data/synthetic_emails.csv` | Pre-generated dataset (400 rows, already committed) |
+| `analysis/eda.ipynb` | EDA → preprocessing → three classifiers (LR / NB / SVM) → confusion matrix, cross-validation, feature importance, LLM comparison |
+| `analysis/plots/` | All 10 charts saved here when the notebook runs |
+
+The trained classifier predicts `category` and `priority` from email text and is compared against the LLM agent. The agent's core pipeline (reply drafting, policy lookup, escalation) is unchanged.
 
 ## Tests and evals
 
